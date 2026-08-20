@@ -19,8 +19,8 @@ const ROOT_DOMAIN = "(root)";
 
 /**
  * @typedef {Object} VaultFile
- * @property {string} path       - vault-relative, e.g. "ventures/silvia-ai.md"
- * @property {string} name       - basename without extension, e.g. "silvia-ai"
+ * @property {string} path       - vault-relative, e.g. "domain/some-note.md"
+ * @property {string} name       - basename without extension, e.g. "some-note"
  * @property {string} domain     - first path segment, or "(root)" for top-level files
  * @property {Object} data       - parsed frontmatter (all values are strings or string arrays)
  * @property {string} body       - markdown after the frontmatter
@@ -113,8 +113,8 @@ export function buildModel(rawFiles) {
  *
  * THE IMPORTANT RULE: a target containing "/" is never resolved by basename.
  *
- * This is not a stylistic choice. A link to the deleted `coaching-admin/status`
- * once resolved against the unrelated `projects/focus-timer/status.md` purely
+ * This is not a stylistic choice. A link to a deleted `notes/status`
+ * once resolved against an unrelated `archive/status.md` purely
  * because both end in "status.md" — and that false match let a genuinely broken
  * link survive three audits that all reported clean. If an author wrote a path,
  * a missing file at that path is broken, not an invitation to guess.

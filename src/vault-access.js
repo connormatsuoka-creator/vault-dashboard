@@ -91,7 +91,7 @@ export async function pickVault() {
  * consumed a stream, which is a much larger change for no benefit at this size.
  *
  * @param {FileSystemDirectoryHandle} dirHandle
- * @param {string} prefix - path accumulated so far, e.g. "ventures/coaching-admin"
+ * @param {string} prefix - path accumulated so far, e.g. "domain/subfolder"
  * @returns {Promise<Array<{path: string, handle: FileSystemFileHandle}>>}
  */
 async function collectMarkdownHandles(dirHandle, prefix = "") {
@@ -118,7 +118,7 @@ async function collectMarkdownHandles(dirHandle, prefix = "") {
  * Read the whole vault into memory as raw text.
  *
  * Paths are vault-relative and always use forward slashes, e.g.
- * "ventures/coaching-admin/postmortem.md" — so they match the [[wikilink]]
+ * "domain/subfolder/note.md" — so they match the [[wikilink]]
  * format used inside the notes.
  *
  * @param {FileSystemDirectoryHandle} dirHandle
