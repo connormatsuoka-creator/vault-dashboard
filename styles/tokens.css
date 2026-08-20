@@ -1,0 +1,85 @@
+/* tokens.css
+ *
+ * ############################################################
+ * #  PLACEHOLDER PALETTE — this is NOT the visual identity.  #
+ * ############################################################
+ *
+ * Connor is choosing the identity for this project deliberately, unlike Focus
+ * Timer where the look was picked by whoever wrote the code. Until then these
+ * values are intentionally quiet: neutral greys, one restrained accent, no
+ * personality. They exist so the layout has something to consume, not because
+ * anyone chose them.
+ *
+ * The point of putting them here is that swapping in a real identity later
+ * means editing this file only. If a colour ever appears in app.css or in a
+ * .js file, that promise is broken — so it must not.
+ *
+ * Spacing and type scale are NOT placeholder. Those are structural, and
+ * changing them means changing layout, so they are worth getting right now.
+ */
+
+:root {
+  /* --- Colour: PLACEHOLDER --------------------------------------------- */
+  --bg: #14161a;
+  --surface: #1c1f25;
+  --surface-raised: #23272f;
+  --border: #2e333c;
+
+  --text: #e8eaed;
+  --text-muted: #9299a5;
+  --text-faint: #6b7280;
+
+  --accent: #6b8afd;
+  --accent-text: #ffffff;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  /* --- Spacing: structural, not placeholder ---------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* --- Type: family is placeholder, scale is structural ---------------- */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+
+  /* --- Shape ------------------------------------------------------------ */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --max-width: 56rem;
+}
+
+/* Light mode. Same token names, different values — nothing in app.css changes.
+ * Mirrors the pattern Focus Timer already uses, which is a proven approach even
+ * though the specific colours here are not the ones we're keeping. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-raised: #f0f2f5;
+    --border: #dfe3e8;
+
+    --text: #1a1d21;
+    --text-muted: #5b6472;
+    --text-faint: #8b93a1;
+
+    --accent: #3b5bdb;
+    --accent-text: #ffffff;
+
+    --ok: #16a34a;
+    --warn: #b45309;
+    --bad: #dc2626;
+  }
+}

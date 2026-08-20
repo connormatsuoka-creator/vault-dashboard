@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!--
+      Content-Security-Policy.
+
+      default-src 'none' means: this page may not talk to the network, at all.
+      No fetch, no XHR, no websockets, no remote images, no analytics. Since
+      connect-src is not listed it falls back to 'none' too.
+
+      That is the whole security argument for hosting this publicly: the page
+      reads your vault from disk into memory, and there is nowhere for that data
+      to go. Not "we promise not to send it" — the browser refuses to.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    />
+
+    <title>Vault Dashboard</title>
+    <link rel="stylesheet" href="styles/tokens.css" />
+    <link rel="stylesheet" href="styles/app.css" />
+  </head>
+
+  <body>
+    <header class="app-header">
+      <h1 class="app-title">Vault Dashboard</h1>
+      <p class="app-subtitle">Reads your Second Brain from disk. Nothing leaves this machine.</p>
+    </header>
+
+    <main class="app-main">
+      <!-- Shown when the browser cannot do this at all. -->
+      <section id="unsupported" class="panel panel--error" hidden>
+        <h2 class="panel-title">This browser can't open local folders</h2>
+        <p id="unsupported-detail" class="muted"></p>
+      </section>
+
+      <!-- The starting state: one button. -->
+      <section id="picker" class="panel" hidden>
+        <h2 class="panel-title">Open your vault</h2>
+        <p class="muted">
+          Pick the <code>second-brain</code> folder. Access is read-only — the dashboard
+          cannot modify your notes.
+        </p>
+        <button id="open-vault" class="button" type="button">Open vault folder</button>
+      </section>
+
+      <!-- Errors from the picker or the read. -->
+      <section id="error" class="panel panel--error" hidden>
+        <h2 class="panel-title">Couldn't read the vault</h2>
+        <p id="error-detail" class="muted"></p>
+        <button id="retry" class="button" type="button">Try again</button>
+      </section>
+
+      <section id="loading" class="panel" hidden>
+        <p class="muted">Reading vault…</p>
+      </section>
+
+      <!-- Foundation proof-of-life: the numbers. -->
+      <section id="summary" class="panel" hidden>
+        <h2 class="panel-title">Vault loaded</h2>
+        <dl id="counts" class="stat-grid"></dl>
+
+        <h3 class="section-title">Files by domain</h3>
+        <ul id="domains" class="bar-list"></ul>
+
+        <h3 class="section-title">Problems</h3>
+        <ul id="problems" class="problem-list"></ul>
+
+        <button id="reload" class="button button--quiet" type="button">Open a different folder</button>
+      </section>
+    </main>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+</html>

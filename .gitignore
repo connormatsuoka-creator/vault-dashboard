@@ -1,0 +1,6 @@
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# No build step and no dependencies — nothing to ignore beyond this.
