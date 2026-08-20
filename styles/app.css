@@ -11,6 +11,18 @@
   box-sizing: border-box;
 }
 
+/* The browser hides [hidden] elements via a UA rule of [hidden]{display:none},
+ * but ANY author rule setting display beats it — so `.check-items{display:flex}`
+ * silently made hidden do nothing, and every disclosure stayed stuck open.
+ *
+ * This restates it as an author rule with !important so the attribute keeps
+ * working regardless of what display a component sets on itself. Without it,
+ * every future flex or grid element that also needs to hide is the same bug
+ * again, and it looks like broken JavaScript rather than broken CSS. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   padding: var(--space-6) var(--space-4) var(--space-7);
