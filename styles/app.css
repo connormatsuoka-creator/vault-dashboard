@@ -193,45 +193,135 @@ code {
   color: var(--text-muted);
 }
 
-/* --- Problem list ------------------------------------------------------- */
+/* --- Health checks ------------------------------------------------------ */
 
-.problem-list {
+.health-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.verdict {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.verdict--attention {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.check-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.check {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* The whole row is the button, so the hit target matches what looks clickable. */
+.check-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(7rem, 10rem) 1fr 1.25rem;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: none;
+  border-radius: var(--radius-sm);
+}
+
+.check-row[aria-expanded] {
+  cursor: pointer;
+}
+
+.check-row:hover[aria-expanded] {
+  filter: brightness(1.15);
+}
+
+.check-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.check-mark {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.check--pass .check-mark {
+  color: var(--ok);
+}
+.check--warn .check-mark {
+  color: var(--warn);
+}
+.check--fail .check-mark {
+  color: var(--bad);
+}
+
+.check-label {
+  font-weight: 500;
+}
+
+.check-summary {
+  color: var(--text-muted);
+}
+
+.check-toggle {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  justify-self: end;
+}
+
+.check-items {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3) 5.5rem;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   font-size: var(--text-sm);
 }
 
-.problem {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-raised);
-  border-radius: var(--radius-sm);
+.check-item-text {
+  display: block;
 }
 
-.problem-mark {
-  flex: none;
-  font-weight: 700;
-  font-family: var(--font-mono);
-}
-
-.problem--ok .problem-mark {
-  color: var(--ok);
-}
-.problem--warn .problem-mark {
-  color: var(--warn);
-}
-.problem--bad .problem-mark {
-  color: var(--bad);
-}
-
-.problem-detail {
+.check-item-detail {
+  display: block;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+.check-more {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+/* The thresholds are a derived copy of numbers the vault owns. Showing them is
+ * what makes a divergence visible instead of silent — so this must stay on
+ * screen, not be tucked behind a disclosure. */
+.threshold-note {
+  margin: var(--space-4) 0 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
 }

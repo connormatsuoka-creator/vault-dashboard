@@ -1,17 +1,23 @@
 // main.js
 //
-// Wires the three modules together and puts the result on screen.
+// Wires the modules together and puts the result on screen.
 //
 // The pipeline is one line of meaning:
-//     pickVault() -> readVault() -> buildModel() -> render
+//     pickVault() -> readVault() -> buildModel() -> runHealthChecks() -> render
 //
-// What this renders is deliberately plain: counts. It is the foundation's
-// proof-of-life, not the health panel. If these numbers match what the vault's
-// own bash audits report, the foundation is correct — and that same data is
-// most of what the health panel will later need.
+// Rendering is deliberately fixed-size: eight check rows whatever the vault
+// contains, with detail behind a disclosure. Every check computes over the
+// whole vault because that is cheap at any size — but a screen listing every
+// result stops being readable long before it stops being fast.
 
 import { isSupported, pickVault, readVault, VaultAccessError } from "./vault-access.js";
 import { buildModel } from "./model.js";
+import { runHealthChecks, THRESHOLDS } from "./health.js";
+
+/** Items shown when a check is expanded. Beyond this it says "and N more" —
+ *  the point of the panel is a fixed-size default view, and a 500-row list is
+ *  not information. */
+const MAX_ITEMS_SHOWN = 20;
 
 // ---------------------------------------------------------------------------
 // Element references. Looked up once; the shell owns the markup, not this file.
@@ -27,9 +33,11 @@ const els = {
   retry: document.getElementById("retry"),
   loading: document.getElementById("loading"),
   summary: document.getElementById("summary"),
+  verdict: document.getElementById("verdict"),
+  health: document.getElementById("health"),
+  thresholds: document.getElementById("thresholds"),
   counts: document.getElementById("counts"),
   domains: document.getElementById("domains"),
-  problems: document.getElementById("problems"),
   reload: document.getElementById("reload"),
 };
 
@@ -83,9 +91,115 @@ async function openVault() {
 // ---------------------------------------------------------------------------
 
 function render(model) {
+  renderHealth(runHealthChecks(model, THRESHOLDS));
+  renderThresholds(THRESHOLDS);
   renderCounts(model);
   renderDomains(model);
-  renderProblems(model);
+}
+
+/**
+ * One row per check, always. Detail lives behind a disclosure so this view is
+ * the same size for a vault of 30 files or 30,000 — the checks all compute in
+ * milliseconds either way, but a screen listing every result stops being
+ * readable long before it stops being fast.
+ */
+function renderHealth(checks) {
+  const needAttention = checks.filter((c) => c.status !== "pass").length;
+  els.verdict.textContent =
+    needAttention === 0 ? "all clear" : `${needAttention} of ${checks.length} need attention`;
+  els.verdict.classList.toggle("verdict--attention", needAttention > 0);
+
+  els.health.replaceChildren(...checks.map(buildCheckRow));
+}
+
+function buildCheckRow(check) {
+  const li = document.createElement("li");
+  li.className = `check check--${check.status}`;
+
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "check-row";
+
+  const mark = document.createElement("span");
+  mark.className = "check-mark";
+  mark.textContent = check.status === "pass" ? "OK" : check.status === "warn" ? "!" : "X";
+
+  const label = document.createElement("span");
+  label.className = "check-label";
+  label.textContent = check.label;
+
+  const summary = document.createElement("span");
+  summary.className = "check-summary";
+  summary.textContent = check.summary;
+
+  const toggle = document.createElement("span");
+  toggle.className = "check-toggle";
+
+  row.append(mark, label, summary, toggle);
+  li.append(row);
+
+  // A check with nothing to show is not a disclosure. Leaving off aria-expanded
+  // is also what the CSS keys on to withhold the pointer cursor, so a row never
+  // looks clickable when clicking it would do nothing.
+  if (check.items.length === 0) {
+    row.disabled = true;
+    return li;
+  }
+
+  const list = document.createElement("ul");
+  list.className = "check-items";
+  list.append(
+    ...check.items.slice(0, MAX_ITEMS_SHOWN).map((item) => {
+      const entry = document.createElement("li");
+      const text = document.createElement("span");
+      text.className = "check-item-text";
+      text.textContent = item.text;
+      entry.append(text);
+      if (item.detail) {
+        const detail = document.createElement("span");
+        detail.className = "check-item-detail";
+        detail.textContent = item.detail;
+        entry.append(detail);
+      }
+      return entry;
+    })
+  );
+
+  if (check.items.length > MAX_ITEMS_SHOWN) {
+    const more = document.createElement("li");
+    more.className = "check-more";
+    more.textContent = `…and ${check.items.length - MAX_ITEMS_SHOWN} more`;
+    list.append(more);
+  }
+
+  // Anything not passing opens by itself — if a check found something, hiding
+  // it behind a click defeats the purpose of running it.
+  const openByDefault = check.status !== "pass";
+  list.hidden = !openByDefault;
+  row.setAttribute("aria-expanded", String(openByDefault));
+  toggle.textContent = openByDefault ? "▾" : "▸";
+
+  row.addEventListener("click", () => {
+    const nowOpen = row.getAttribute("aria-expanded") !== "true";
+    row.setAttribute("aria-expanded", String(nowOpen));
+    list.hidden = !nowOpen;
+    toggle.textContent = nowOpen ? "▾" : "▸";
+  });
+
+  li.append(list);
+  return li;
+}
+
+/**
+ * The thresholds are a derived copy of numbers the vault's router owns.
+ * Printing them is what turns a silent divergence into a visible one — the same
+ * reasoning behind the vault's rule that a stale pointer should fail loudly.
+ */
+function renderThresholds(t) {
+  els.thresholds.textContent =
+    `thresholds — router ${t.caps.router} · index ${t.caps.index} · leaf ${t.caps.leaf} · ` +
+    `inbox ${t.inboxMax} items · stale ${t.staleDays}d · warn at ${Math.round(t.warnAtFraction * 100)}%  ` +
+    `(source: ${t.source})`;
 }
 
 function renderCounts(model) {
@@ -154,64 +268,6 @@ function renderDomains(model) {
       count.textContent = String(files.length);
 
       li.append(name, track, count);
-      return li;
-    })
-  );
-}
-
-/**
- * Structural problems the model can see on its own.
- *
- * Deliberately excludes anything threshold-based — staleness and size caps need
- * numbers that belong with the health panel, not here. This is only what is
- * true by construction: a topic owned twice, a link that does not resolve,
- * frontmatter that would not parse.
- */
-function renderProblems(model) {
-  const problems = [];
-
-  for (const [topic, files] of model.byTopic) {
-    if (files.length > 1) {
-      problems.push(["bad", `Topic "${topic}" is owned by ${files.length} files`, files.map((f) => f.path).join("  ·  ")]);
-    }
-  }
-
-  for (const link of model.links) {
-    if (link.status === "broken") {
-      problems.push(["bad", `Broken link [[${link.target}]]`, link.from]);
-    } else if (link.status === "ambiguous") {
-      problems.push(["warn", `Ambiguous link [[${link.target}]] — ${link.candidates.length} candidates`, link.candidates.join("  ·  ")]);
-    }
-  }
-
-  for (const warning of model.warnings) {
-    problems.push(["warn", warning, ""]);
-  }
-
-  if (problems.length === 0) {
-    problems.push(["ok", "No structural problems found", "no duplicate topics, no unresolved links, no parse warnings"]);
-  }
-
-  els.problems.replaceChildren(
-    ...problems.map(([level, text, detail]) => {
-      const li = document.createElement("li");
-      li.className = `problem problem--${level}`;
-
-      const mark = document.createElement("span");
-      mark.className = "problem-mark";
-      mark.textContent = level === "ok" ? "OK" : level === "warn" ? "!" : "X";
-
-      const body = document.createElement("span");
-      body.textContent = text;
-
-      li.append(mark, body);
-
-      if (detail) {
-        const d = document.createElement("span");
-        d.className = "problem-detail";
-        d.textContent = detail;
-        li.append(d);
-      }
       return li;
     })
   );

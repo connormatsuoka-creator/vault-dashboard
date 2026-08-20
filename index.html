@@ -59,16 +59,24 @@
         <p class="muted">Reading vault…</p>
       </section>
 
-      <!-- Foundation proof-of-life: the numbers. -->
+      <!--
+        Health first: it is the reason this dashboard exists. Eight rows, always
+        eight, whatever the size of the vault. Detail is behind a disclosure so
+        the default view stays a fixed size as the vault grows.
+      -->
       <section id="summary" class="panel" hidden>
-        <h2 class="panel-title">Vault loaded</h2>
+        <div class="health-head">
+          <h2 class="panel-title">Vault health</h2>
+          <span id="verdict" class="verdict"></span>
+        </div>
+        <ul id="health" class="check-list"></ul>
+        <p id="thresholds" class="threshold-note"></p>
+
+        <h3 class="section-title">Overview</h3>
         <dl id="counts" class="stat-grid"></dl>
 
         <h3 class="section-title">Files by domain</h3>
         <ul id="domains" class="bar-list"></ul>
-
-        <h3 class="section-title">Problems</h3>
-        <ul id="problems" class="problem-list"></ul>
 
         <button id="reload" class="button button--quiet" type="button">Open a different folder</button>
       </section>
