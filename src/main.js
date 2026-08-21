@@ -198,8 +198,9 @@ function buildCheckRow(check) {
 function renderThresholds(t) {
   els.thresholds.textContent =
     `thresholds — router ${t.caps.router} · index ${t.caps.index} · leaf ${t.caps.leaf} · ` +
-    `inbox ${t.inboxMax} items · stale ${t.staleDays}d · warn at ${Math.round(t.warnAtFraction * 100)}%  ` +
-    `(source: ${t.source})`;
+    `inbox ${t.inboxMax} items · stale ${t.staleDays}d · warn at ${Math.round(t.warnAtFraction * 100)}%` +
+    `${(t.capExempt ?? []).length ? ` · exempt: ${t.capExempt.join(", ")}` : ""}` +
+    `  (source: ${t.source})`;
 }
 
 function renderCounts(model) {

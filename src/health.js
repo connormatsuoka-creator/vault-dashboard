@@ -31,6 +31,10 @@
 export const THRESHOLDS = {
   source: "vault CLAUDE.md — Size caps and Staleness",
   caps: { router: 80, index: 40, leaf: 150 },
+  // Paths the vault exempts from its caps. Data rather than a special case buried
+  // in the check, so the list renders on screen beside the caps themselves — an
+  // exemption nobody can see is indistinguishable from a check that quietly broke.
+  capExempt: ["system/setup.md"],
   inboxMax: 15,
   staleDays: 30,
   // Fractions of a limit at which a check warns instead of passing. Pass/fail
@@ -135,7 +139,11 @@ function checkLinks(model) {
 }
 
 /** Which cap applies depends on the file's role, matching the vault's rules. */
-function capFor(path, caps) {
+function capFor(path, thresholds) {
+  const { caps, capExempt = [] } = thresholds;
+  // Infinity rather than an early return: both the over-cap test and the
+  // approaching-cap fraction below then fall out correctly with no second branch.
+  if (capExempt.includes(path)) return { cap: Infinity, kind: "exempt" };
   if (!path.includes("/")) return { cap: caps.router, kind: "router" };
   if (path.endsWith("_index.md")) return { cap: caps.index, kind: "index" };
   return { cap: caps.leaf, kind: "leaf" };
@@ -146,7 +154,7 @@ function checkSizeCaps(model, thresholds) {
   const approaching = [];
 
   for (const file of model.files) {
-    const { cap, kind } = capFor(file.path, thresholds.caps);
+    const { cap, kind } = capFor(file.path, thresholds);
     const fraction = file.lineCount / cap;
 
     if (file.lineCount > cap) {
