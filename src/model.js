@@ -170,8 +170,8 @@ function resolveLink(target, fromPath, byPath, byBasename) {
  * never checked, or show as plain text something the audit counted — and the
  * discrepancy would be invisible from either side.
  */
-const LINK_SOURCE = String.raw`\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`;
-const linkRegex = () => new RegExp(LINK_SOURCE, "g"); // fresh: /g carries lastIndex
+export const LINK_SOURCE = String.raw`\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`;
+export const linkRegex = () => new RegExp(LINK_SOURCE, "g"); // fresh: /g carries lastIndex
 
 /**
  * Split body text into lines, marking which are code.
@@ -187,7 +187,7 @@ const linkRegex = () => new RegExp(LINK_SOURCE, "g"); // fresh: /g carries lastI
  * full of them. The block rule already covers the documentation case, which is
  * the only place illustrative brackets actually appear.
  */
-function classifyLines(body) {
+export function classifyLines(body) {
   let inFence = false;
   return body.split(/\r?\n/).map((line) => {
     // The fence line itself is code, and it flips the state for what follows.

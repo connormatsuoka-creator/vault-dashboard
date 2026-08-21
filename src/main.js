@@ -15,6 +15,7 @@ import { buildModel, segmentBody } from "./model.js";
 import { runHealthChecks, loadThresholds } from "./health.js";
 import { searchVault, MAX_RESULTS } from "./search.js";
 import { buildGraph, layout, scene } from "./graph.js";
+import { parseMarkdown } from "./markdown.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -58,6 +59,9 @@ const els = {
   fileMeta: document.getElementById("file-meta"),
   fileBacklinks: document.getElementById("file-backlinks"),
   fileBody: document.getElementById("file-body"),
+  fileRendered: document.getElementById("file-rendered"),
+  modeRaw: document.getElementById("mode-raw"),
+  modeRendered: document.getElementById("mode-rendered"),
 
   graph: document.getElementById("graph"),
   graphSvg: document.getElementById("graph-svg"),
@@ -89,6 +93,10 @@ const state = {
   graph: null,
   positions: null,
   view: { mode: "domains" },
+
+  // Raw is the default. It is the view with no parser between you and the
+  // file, so it is the one that cannot be wrong.
+  mode: "raw",
 };
 
 /**
@@ -579,11 +587,26 @@ function renderBacklinks(file) {
 }
 
 function renderBody(file) {
-  const segments = segmentBody(file.body, resolutionsFor(file.path));
+  const resolutions = resolutionsFor(file.path);
+  const rendered = state.mode === "rendered";
 
-  els.fileBody.replaceChildren(
-    ...segments.map((s) => (s.type === "text" ? document.createTextNode(s.value) : linkNode(s)))
-  );
+  els.fileBody.hidden = rendered;
+  els.fileRendered.hidden = !rendered;
+
+  if (rendered) {
+    els.fileRendered.replaceChildren(...parseMarkdown(file.body, resolutions).map(blockNode));
+  } else {
+    els.fileBody.replaceChildren(
+      ...segmentBody(file.body, resolutions).map((s) =>
+        s.type === "text" ? document.createTextNode(s.value) : linkNode(s)
+      )
+    );
+  }
+
+  for (const [mode, ref] of [["raw", "modeRaw"], ["rendered", "modeRendered"]]) {
+    if (state.mode === mode) els[ref].setAttribute("aria-current", "true");
+    else els[ref].removeAttribute("aria-current");
+  }
 }
 
 /** target -> how the model resolved it, for this file's links only. */
@@ -602,13 +625,14 @@ function resolutionsFor(path) {
  * control that looks live and does nothing is precisely the bug that made the
  * health disclosures feel broken when the JavaScript was correct all along.
  */
-function linkNode(segment) {
+function linkNode(segment, extraClass = "") {
   const label = `[[${segment.target}]]`;
+  const extra = extraClass ? ` ${extraClass}` : "";
 
   if (segment.status === "resolved") {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "vlink";
+    button.className = `vlink${extra}`;
     button.textContent = label;
     button.title = segment.resolvedPath;
     button.addEventListener("click", () => openFile(segment.resolvedPath));
@@ -616,7 +640,7 @@ function linkNode(segment) {
   }
 
   const span = document.createElement("span");
-  span.className = `vlink vlink--${segment.status === "ambiguous" ? "ambiguous" : "broken"}`;
+  span.className = `vlink vlink--${segment.status === "ambiguous" ? "ambiguous" : "broken"}${extra}`;
   span.textContent = label;
   span.title =
     segment.status === "ambiguous"
@@ -631,6 +655,163 @@ function markCurrent(path) {
     else button.removeAttribute("aria-current");
   }
 }
+
+// ---------------------------------------------------------------------------
+// Rendered markdown
+//
+// Turns the block tree from markdown.js into nodes. It parses nothing and
+// decides no structure — same split as the graph's scene, and the reason both
+// parsers are testable in Node at all.
+//
+// Every node is built with createElement + textContent. Never innerHTML: the
+// CSP would stop injected script anyway, but this is the layer that should not
+// be relying on that.
+// ---------------------------------------------------------------------------
+
+/** Markdown h1 sits below the file's own h3, so levels shift down by three. */
+const HEADING_TAG = { 1: "h4", 2: "h5", 3: "h6" };
+
+function blockNode(block) {
+  switch (block.type) {
+    case "heading": {
+      const level = Math.min(block.level, 3);
+      const el = document.createElement(HEADING_TAG[level]);
+      el.className = `md-h${level}`;
+      el.append(...inlineNodes(block.inline));
+      return el;
+    }
+
+    case "paragraph": {
+      const p = document.createElement("p");
+      p.append(...inlineNodes(block.inline));
+      return p;
+    }
+
+    case "list": {
+      const list = document.createElement(block.ordered ? "ol" : "ul");
+      // A list that starts at 0 or 3 must say so, or the rendered document
+      // disagrees with the source about its own numbering.
+      if (block.ordered && block.start !== undefined && block.start !== 1) {
+        list.setAttribute("start", String(block.start));
+      }
+      list.append(
+        ...block.items.map((item) => {
+          const li = document.createElement("li");
+          li.append(...inlineNodes(item));
+          return li;
+        })
+      );
+      return list;
+    }
+
+    case "quote": {
+      const quote = document.createElement("blockquote");
+      quote.className = "md-quote";
+      quote.append(...inlineNodes(block.inline));
+      return quote;
+    }
+
+    case "code": {
+      // Wrapped in <pre><code> so the content is unambiguous to a screen
+      // reader as well as to the eye.
+      const pre = document.createElement("pre");
+      pre.className = "md-pre";
+      const code = document.createElement("code");
+      code.textContent = block.text;
+      pre.append(code);
+      return pre;
+    }
+
+    case "rule": {
+      const hr = document.createElement("hr");
+      hr.className = "md-rule";
+      return hr;
+    }
+
+    case "table":
+      return tableNode(block);
+
+    default: {
+      // An unknown block type is a bug in the parser, not a reason to drop
+      // content on the floor.
+      const p = document.createElement("p");
+      p.textContent = JSON.stringify(block);
+      return p;
+    }
+  }
+}
+
+/**
+ * Tables get their own scroll container.
+ *
+ * They appear in 20 of 34 files and are often wide. Letting one scroll inside
+ * its own box is what keeps the page itself from scrolling sideways on a phone.
+ */
+function tableNode(block) {
+  const wrap = document.createElement("div");
+  wrap.className = "md-table-wrap";
+
+  const table = document.createElement("table");
+  table.className = "md-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  block.head.forEach((cell, i) => {
+    const th = document.createElement("th");
+    if (block.align?.[i] && block.align[i] !== "left") th.style.textAlign = block.align[i];
+    th.append(...inlineNodes(cell));
+    headRow.append(th);
+  });
+  thead.append(headRow);
+
+  const tbody = document.createElement("tbody");
+  for (const row of block.rows) {
+    const tr = document.createElement("tr");
+    row.forEach((cell, i) => {
+      const td = document.createElement("td");
+      if (block.align?.[i] && block.align[i] !== "left") td.style.textAlign = block.align[i];
+      td.append(...inlineNodes(cell));
+      tr.append(td);
+    });
+    tbody.append(tr);
+  }
+
+  table.append(thead, tbody);
+  wrap.append(table);
+  return wrap;
+}
+
+function inlineNodes(tokens) {
+  return tokens.map((token) => {
+    switch (token.type) {
+      case "text":
+        return document.createTextNode(token.value);
+
+      case "code": {
+        const code = document.createElement("code");
+        code.className = "md-code";
+        code.textContent = token.value;
+        return code;
+      }
+
+      case "strong":
+      case "em": {
+        const el = document.createElement(token.type === "strong" ? "strong" : "em");
+        el.append(...inlineNodes(token.children));
+        return el;
+      }
+
+      case "link":
+        // The same node builder both views use, so a broken link looks and
+        // behaves identically whether you are reading source or prose.
+        return linkNode(token, token.inCode ? "md-link-code" : "");
+
+      default:
+        return document.createTextNode("");
+    }
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // Connections
@@ -822,6 +1003,15 @@ els.graphOpen.addEventListener("click", () => {
 // 34 files scanned per keystroke costs microseconds — a debounce would only add
 // latency and a timer to reason about.
 els.search.addEventListener("input", () => renderBrowseList(els.search.value));
+
+for (const [mode, ref] of [["raw", "modeRaw"], ["rendered", "modeRendered"]]) {
+  els[ref].addEventListener("click", () => {
+    if (state.mode === mode) return;
+    state.mode = mode;
+    // Re-render in place: switching view must not lose which file is open.
+    if (state.path) renderFile(state.model.byPath.get(state.path));
+  });
+}
 
 els.fileBack.addEventListener("click", () => {
   const previous = state.history.pop();

@@ -124,11 +124,22 @@
             <article id="file-view" hidden>
               <div class="file-head">
                 <h3 id="file-path" class="file-path"></h3>
-                <button id="file-back" class="button button--small" type="button" hidden>← Back</button>
+                <div class="file-actions">
+                  <!--
+                    Raw is the default and stays available. It is the view that
+                    cannot break: no parser between you and the file.
+                  -->
+                  <div class="file-modes" role="group" aria-label="View mode">
+                    <button id="mode-raw" class="mode-tab" type="button">Raw</button>
+                    <button id="mode-rendered" class="mode-tab" type="button">Rendered</button>
+                  </div>
+                  <button id="file-back" class="button button--small" type="button" hidden>← Back</button>
+                </div>
               </div>
               <dl id="file-meta" class="file-meta"></dl>
               <div id="file-backlinks" class="file-backlinks"></div>
               <pre id="file-body" class="file-body"></pre>
+              <div id="file-rendered" class="file-rendered" hidden></div>
             </article>
           </div>
         </div>
