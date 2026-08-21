@@ -14,6 +14,7 @@ import { isSupported, pickVault, readVault, VaultAccessError } from "./vault-acc
 import { buildModel, segmentBody } from "./model.js";
 import { runHealthChecks, loadThresholds } from "./health.js";
 import { searchVault, MAX_RESULTS } from "./search.js";
+import { buildGraph, layout, scene } from "./graph.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -44,6 +45,7 @@ const els = {
   viewNav: document.getElementById("view-nav"),
   viewHealth: document.getElementById("view-health"),
   viewBrowse: document.getElementById("view-browse"),
+  viewGraph: document.getElementById("view-graph"),
 
   browse: document.getElementById("browse"),
   search: document.getElementById("search"),
@@ -56,13 +58,21 @@ const els = {
   fileMeta: document.getElementById("file-meta"),
   fileBacklinks: document.getElementById("file-backlinks"),
   fileBody: document.getElementById("file-body"),
+
+  graph: document.getElementById("graph"),
+  graphSvg: document.getElementById("graph-svg"),
+  graphCaption: document.getElementById("graph-caption"),
+  graphNote: document.getElementById("graph-note"),
+  graphHome: document.getElementById("graph-home"),
+  graphFull: document.getElementById("graph-full"),
+  graphOpen: document.getElementById("graph-open"),
 };
 
 /** Panels that showOnly arbitrates between. */
-const PANELS = ["unsupported", "picker", "error", "loading", "summary", "browse"];
+const PANELS = ["unsupported", "picker", "error", "loading", "summary", "browse", "graph"];
 
 /** The subset that means "a vault is open" — the switcher belongs to these. */
-const VIEWS = { summary: "viewHealth", browse: "viewBrowse" };
+const VIEWS = { summary: "viewHealth", browse: "viewBrowse", graph: "viewGraph" };
 
 /**
  * Everything the browse view needs to remember. Deliberately small and plain:
@@ -72,6 +82,13 @@ const state = {
   model: null,
   path: null,
   history: [],
+
+  // The graph and its layout are computed once per vault. Recomputing per view
+  // is what would let nodes drift, which is the one thing the design cannot
+  // afford.
+  graph: null,
+  positions: null,
+  view: { mode: "domains" },
 };
 
 /**
@@ -116,6 +133,10 @@ async function openVault() {
     state.history = [];
     els.search.value = "";
 
+    state.graph = buildGraph(model);
+    state.positions = layout(state.graph, { cx: 360, cy: 258 });
+    state.view = { mode: "domains" };
+
     render(model);
     showOnly("summary");
   } catch (err) {
@@ -151,6 +172,7 @@ function render(model) {
   renderDomains(model);
   renderBrowseList("");
   clearFile();
+  renderGraph();
 }
 
 /**
@@ -611,6 +633,173 @@ function markCurrent(path) {
 }
 
 // ---------------------------------------------------------------------------
+// Connections
+//
+// A renderer and nothing more. graph.js decides what is visible, where it sits
+// and how it is emphasised; this reads that scene and draws it. The drill-down
+// is a mechanic, and the look is placeholder — so every decision worth keeping
+// lives on the other side of this boundary, and a restyle rewrites only what
+// is below.
+// ---------------------------------------------------------------------------
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Labelling everything at 30 nodes is a smear; the hubs are what orient you. */
+const LABEL_DEGREE_IN_FULL = 5;
+
+function svg(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  return node;
+}
+
+/** Node size reads degree at a glance. sqrt so a hub does not swamp the view. */
+const radiusFor = (degree) => 4 + Math.sqrt(degree) * 2;
+
+function setGraphView(view) {
+  state.view = view;
+  renderGraph();
+}
+
+function renderGraph() {
+  if (!state.graph) return;
+
+  const current = scene(state.graph, state.positions, state.view);
+  state.view = { ...state.view, mode: current.mode }; // scene may have fallen back
+
+  els.graphCaption.textContent = current.caption;
+  els.graphNote.textContent = current.isolated
+    ? `${current.isolated} files have no links in either direction — index files list their contents as plain names, not wiki-links, so they never enter the graph.`
+    : "";
+
+  const layers = { edges: [], marks: [], labels: [] };
+
+  for (const chord of current.domainChords) {
+    layers.edges.push(
+      svg("path", {
+        class: "gchord",
+        d: `M${chord.from.x} ${chord.from.y} Q ${chord.via.x} ${chord.via.y} ${chord.to.x} ${chord.to.y}`,
+        "stroke-width": Math.min(6, 1 + chord.weight * 0.55),
+      })
+    );
+  }
+
+  for (const edge of current.edges) {
+    layers.edges.push(
+      svg("path", {
+        class: `gedge${edge.state === "emphasis" ? " gedge--emphasis" : ""}`,
+        d: `M${edge.from.x} ${edge.from.y} Q ${edge.via.x} ${edge.via.y} ${edge.to.x} ${edge.to.y}`,
+      })
+    );
+  }
+
+  for (const domain of current.domains) {
+    const group = svg("g", { class: `gdom gdom--${domain.state} ghit`, tabindex: "0", role: "button" });
+    group.append(svg("circle", { cx: domain.x, cy: domain.y, r: domain.state === "focus" ? 17 : 14 }));
+
+    const count = svg("text", { x: domain.x, y: domain.y + 4, "text-anchor": "middle", class: "gdom-count" });
+    count.textContent = String(domain.count);
+    group.append(count);
+
+    // Outward along the marker's own radius, clear of the circle. Inward put
+    // six labels in a huddle around the centre, overlapping each other.
+    const dx = domain.x - current.centre.x;
+    const dy = domain.y - current.centre.y;
+    const away = Math.hypot(dx, dy) || 1;
+    const name = svg("text", {
+      x: domain.x + (dx / away) * 26,
+      y: domain.y + (dy / away) * 26 + 4,
+      "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
+      class: "gdom-name",
+    });
+    name.textContent = domain.name;
+    group.append(name);
+
+    const open = () => setGraphView({ mode: "domain", domain: domain.name });
+    group.addEventListener("click", open);
+    group.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+    layers.marks.push(group);
+  }
+
+  for (const node of current.nodes) {
+    const group = svg("g", { class: `gnode gnode--${node.state} ghit`, tabindex: "0", role: "button" });
+    group.append(svg("circle", { cx: node.x, cy: node.y, r: radiusFor(node.degree) }));
+
+    const title = svg("title");
+    title.textContent = `${node.path} — ${node.degree} link${node.degree === 1 ? "" : "s"}`;
+    group.append(title);
+
+    const focus = () => setGraphView({ mode: "file", path: node.path });
+    group.addEventListener("click", focus);
+    group.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); focus(); }
+    });
+    layers.marks.push(group);
+
+    const worthLabelling =
+      current.mode !== "full" || node.state === "focus" || node.degree >= LABEL_DEGREE_IN_FULL;
+    if (!worthLabelling) continue;
+
+    // Push the label outward along the node's own radius, so it never sits on
+    // top of the ring it belongs to.
+    const dx = node.x - current.centre.x;
+    const dy = node.y - current.centre.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const label = svg("text", {
+      x: node.x + (dx / length) * 15,
+      y: node.y + (dy / length) * 15 + 3.5,
+      "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
+      class: "glabel",
+    });
+    label.textContent = node.name;
+    layers.labels.push(label);
+  }
+
+  els.graphSvg.replaceChildren(...layers.edges, ...layers.marks, ...layers.labels);
+  frameToContent(current);
+
+  // "Read this file" only exists when there is a file to read. The graph finds
+  // things; browse is where you read one.
+  const focused = current.mode === "file" ? state.view.path : null;
+  els.graphOpen.hidden = !focused;
+  if (focused) els.graphOpen.textContent = `Read ${focused} →`;
+}
+
+/**
+ * Point the viewBox at whatever this view actually drew.
+ *
+ * The viewBox is a camera, not a layout. Zooming to the content leaves every
+ * coordinate untouched, so the "nothing moves" guarantee survives — a node at
+ * the same point simply fills more of the frame when fewer things share it.
+ * Without this the domains view puts six markers in the middle of a mostly
+ * empty box, because it is framed for a file ring that is not being drawn.
+ */
+function frameToContent(current) {
+  const points = [...current.domains, ...current.nodes];
+  if (points.length === 0) {
+    els.graphSvg.setAttribute("viewBox", "0 0 720 520");
+    return;
+  }
+
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+
+  // Labels sit outside their marks and run horizontally, so x needs the room.
+  const padX = 96;
+  const padY = 44;
+
+  const minX = Math.min(...xs) - padX;
+  const minY = Math.min(...ys) - padY;
+  const width = Math.max(...xs) + padX - minX;
+  const height = Math.max(...ys) + padY - minY;
+
+  els.graphSvg.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
+}
+
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
@@ -620,6 +809,15 @@ els.reload.addEventListener("click", openVault);
 
 els.viewHealth.addEventListener("click", () => showOnly("summary"));
 els.viewBrowse.addEventListener("click", () => showOnly("browse"));
+els.viewGraph.addEventListener("click", () => showOnly("graph"));
+
+els.graphHome.addEventListener("click", () => setGraphView({ mode: "domains" }));
+els.graphFull.addEventListener("click", () => setGraphView({ mode: "full" }));
+els.graphOpen.addEventListener("click", () => {
+  // The graph is for finding a file; browse is for reading one. openFile()
+  // already switches panels.
+  if (state.view.path) openFile(state.view.path);
+});
 
 // 34 files scanned per keystroke costs microseconds — a debounce would only add
 // latency and a timer to reason about.

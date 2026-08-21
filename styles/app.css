@@ -635,3 +635,129 @@ code {
   font-size: var(--text-xs);
   line-height: 1.6;
 }
+
+/* --- Connections graph --------------------------------------------------- */
+
+/* The look here is placeholder in the same sense tokens.css is. The drill-down
+ * behaviour is not — it lives in graph.js and survives any restyle. Everything
+ * below is presentation only; nothing here decides what a click does. */
+
+.graph-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.graph-controls {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.graph-caption {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+.graph-note {
+  margin: var(--space-3) 0 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* Edges. Emphasis means the link crosses a domain boundary, which is the thing
+ * worth seeing — 33 of this vault's 55 links do. */
+.gedge {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  opacity: 0.3;
+}
+
+.gedge--emphasis {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  opacity: 0.55;
+}
+
+.gchord {
+  fill: none;
+  stroke: var(--accent);
+  opacity: 0.35;
+}
+
+/* Nodes */
+.gnode circle {
+  fill: var(--surface);
+  stroke: var(--text-muted);
+  stroke-width: 1.2;
+}
+
+.gnode--focus circle {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.gdom circle {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.gdom--focus circle {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.gdom--muted {
+  opacity: 0.35;
+}
+
+.gdom--focus .gdom-count {
+  fill: var(--accent-text);
+}
+
+.glabel {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  fill: var(--text-muted);
+}
+
+.gdom-name {
+  font-size: var(--text-xs);
+  fill: var(--text-muted);
+}
+
+.gdom-count {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  fill: var(--accent);
+}
+
+/* Only things that navigate get a pointer — the same rule the disclosures and
+ * the broken wiki-links follow. */
+.ghit {
+  cursor: pointer;
+}
+
+.ghit:hover circle {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.ghit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

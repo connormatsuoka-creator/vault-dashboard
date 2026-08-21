@@ -33,6 +33,7 @@ needed to see a change immediately after pushing.
 | `src/model.js` | Building the queryable model and resolving links |
 | `src/health.js` | The checks, and the **fallback** thresholds. The vault owns the real ones |
 | `src/search.js` | Ranking a query against the model. Pure — no DOM |
+| `src/graph.js` | The connections **mechanic**: what is visible, where, how emphasised. Emits a scene; draws nothing |
 | `src/main.js` | Wiring and DOM rendering |
 | `styles/tokens.css` | Every colour, space, and size. **The only file a restyle should touch** |
 | `styles/app.css` | Layout. Contains no literal colours, and must not |
@@ -46,14 +47,17 @@ needed to see a change immediately after pushing.
 - **No dependencies.** Adding one puts third-party code between the vault and the disk.
 - **No colours outside `tokens.css`.** A literal colour anywhere else breaks the promise
   that the visual identity can be swapped by editing one file.
+- **The graph mechanic is not the graph visual.** Drill-down, layout and view state live in
+  `graph.js`; `main.js` only draws the scene it is handed. A restyle must not need to touch
+  behaviour, and nothing may start deciding what a click does on the drawing side.
 - **Thresholds belong to the vault.** `system/config.md` owns them; `THRESHOLDS` in
   `health.js` is only what to use when a vault has no config, and the panel prints which of
   the two it used.
 
 ## Testing
 
-`node --test src/search.test.js src/health.test.js` — 27 cases covering `search.js`,
-`segmentBody`, `backlinks` and `loadThresholds`. Node's built-in runner, so there is nothing
+`node --test src/search.test.js src/health.test.js src/graph.test.js` — 44 cases covering
+`search.js`, `segmentBody`, `backlinks`, `loadThresholds` and the graph. Node's built-in runner, so there is nothing
 to install and still no `package.json`. (`node --test src/` does not work — pass the files.)
 
 `frontmatter.js`, `model.js`, and `health.js` have no test file but are equally pure, and

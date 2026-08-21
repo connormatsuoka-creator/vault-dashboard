@@ -40,6 +40,7 @@
       <nav id="view-nav" class="view-nav" aria-label="Views" hidden>
         <button id="view-health" class="view-tab" type="button">Health</button>
         <button id="view-browse" class="view-tab" type="button">Browse</button>
+        <button id="view-graph" class="view-tab" type="button">Connections</button>
       </nav>
 
       <!-- Shown when the browser cannot do this at all. -->
@@ -131,6 +132,28 @@
             </article>
           </div>
         </div>
+      </section>
+      <!--
+        Connections. The drill-down is a MECHANIC, not a look: domains, then one
+        domain, then one file and everything touching it, with a full view as an
+        escape hatch. graph.js decides all of that and hands over a scene; this
+        panel only draws it. Replacing the visual should not require touching
+        any of the behaviour.
+      -->
+      <section id="graph" class="panel" hidden>
+        <div class="graph-head">
+          <div class="graph-controls">
+            <button id="graph-home" class="button button--small" type="button">← Domains</button>
+            <button id="graph-full" class="button button--small" type="button">Full view</button>
+            <button id="graph-open" class="button button--small" type="button" hidden></button>
+          </div>
+          <p id="graph-caption" class="graph-caption"></p>
+        </div>
+
+        <svg id="graph-svg" class="graph-svg" viewBox="0 0 720 520" role="img"
+             aria-label="Vault connections"></svg>
+
+        <p id="graph-note" class="graph-note"></p>
       </section>
     </main>
 
