@@ -32,6 +32,7 @@ needed to see a change immediately after pushing.
 | `src/frontmatter.js` | Parsing frontmatter into `{data, body}`. Values stay strings |
 | `src/model.js` | Building the queryable model and resolving links |
 | `src/health.js` | The checks, and the threshold constants |
+| `src/search.js` | Ranking a query against the model. Pure — no DOM |
 | `src/main.js` | Wiring and DOM rendering |
 | `styles/tokens.css` | Every colour, space, and size. **The only file a restyle should touch** |
 | `styles/app.css` | Layout. Contains no literal colours, and must not |
@@ -48,8 +49,12 @@ needed to see a change immediately after pushing.
 
 ## Testing
 
-There is no test runner. `frontmatter.js`, `model.js`, and `health.js` are pure and can be
-exercised from Node directly — they import cleanly and take plain objects.
+`node --test src/search.test.js` — 18 cases covering `search.js`, `segmentBody`, and
+`backlinks`. Node's built-in runner, so there is nothing to install and still no
+`package.json`.
+
+`frontmatter.js`, `model.js`, and `health.js` have no test file but are equally pure, and
+can be exercised from Node directly — they import cleanly and take plain objects.
 
 **`vault-access.js` and the DOM rendering in `main.js` cannot be tested that way.** Both
 need a real browser and a real folder-pick, which requires a human gesture. Every bug that
