@@ -45,6 +45,72 @@ export const THRESHOLDS = {
   warnAtStaleDays: 21,
 };
 
+/** Where the vault keeps the real numbers. */
+const CONFIG_PATH = "system/config.md";
+
+/**
+ * Read the thresholds from the vault, falling back per key.
+ *
+ * THRESHOLDS above is no longer the authority — it is the fallback for when the
+ * vault cannot be read. The vault owns these numbers; this file keeps a copy so
+ * the dashboard still runs against a folder that has no config, and says which
+ * of the two it used.
+ *
+ * **Per key, not all-or-nothing.** One typo'd line should cost you that one
+ * value, not silently revert every threshold to a copy that may be months old.
+ *
+ * A value that is present but nonsense — a negative cap, a fraction of 5 —
+ * falls back too. Frontmatter values arrive as strings, so everything here is
+ * coerced and range-checked rather than trusted.
+ */
+export function loadThresholds(model, fallback = THRESHOLDS) {
+  const file = model?.byPath?.get(CONFIG_PATH);
+  if (!file || !file.hasFrontmatter) {
+    return { ...fallback, source: `built-in fallback — this vault has no ${CONFIG_PATH}` };
+  }
+
+  const fellBack = [];
+
+  const num = (key, current, ok = (n) => n > 0) => {
+    const raw = file.data[key];
+    if (raw === undefined) { fellBack.push(key); return current; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !ok(n)) { fellBack.push(key); return current; }
+    return n;
+  };
+
+  const list = (key, current) => {
+    const raw = file.data[key];
+    if (raw === undefined) { fellBack.push(key); return current; }
+    return Array.isArray(raw) ? raw : [raw];
+  };
+
+  const isFraction = (n) => n > 0 && n <= 1;
+
+  const t = {
+    caps: {
+      router: num("cap-router", fallback.caps.router),
+      index: num("cap-index", fallback.caps.index),
+      leaf: num("cap-leaf", fallback.caps.leaf),
+    },
+    capExempt: list("cap-exempt", fallback.capExempt ?? []),
+    inboxMax: num("inbox-max", fallback.inboxMax),
+    staleDays: num("stale-days", fallback.staleDays),
+    warnAtFraction: num("warn-at-fraction", fallback.warnAtFraction, isFraction),
+    warnAtInbox: num("warn-at-inbox", fallback.warnAtInbox),
+    warnAtStaleDays: num("warn-at-stale-days", fallback.warnAtStaleDays),
+  };
+
+  // Naming the source is the whole safety mechanism for a duplicated number: a
+  // divergence shows up on the next load instead of being wrong for months.
+  t.source =
+    fellBack.length === 0
+      ? `vault ${CONFIG_PATH}`
+      : `vault ${CONFIG_PATH} — ${fellBack.length} fell back: ${fellBack.join(", ")}`;
+
+  return t;
+}
+
 /** Values the vault's frontmatter contract allows. Anything else is a typo. */
 const VOCABULARY = {
   status: ["hot", "cold"],

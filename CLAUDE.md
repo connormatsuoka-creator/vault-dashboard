@@ -31,7 +31,7 @@ needed to see a change immediately after pushing.
 | `src/vault-access.js` | Every filesystem interaction. Nothing else knows the File System Access API exists |
 | `src/frontmatter.js` | Parsing frontmatter into `{data, body}`. Values stay strings |
 | `src/model.js` | Building the queryable model and resolving links |
-| `src/health.js` | The checks, and the threshold constants |
+| `src/health.js` | The checks, and the **fallback** thresholds. The vault owns the real ones |
 | `src/search.js` | Ranking a query against the model. Pure — no DOM |
 | `src/main.js` | Wiring and DOM rendering |
 | `styles/tokens.css` | Every colour, space, and size. **The only file a restyle should touch** |
@@ -46,12 +46,15 @@ needed to see a change immediately after pushing.
 - **No dependencies.** Adding one puts third-party code between the vault and the disk.
 - **No colours outside `tokens.css`.** A literal colour anywhere else breaks the promise
   that the visual identity can be swapped by editing one file.
+- **Thresholds belong to the vault.** `system/config.md` owns them; `THRESHOLDS` in
+  `health.js` is only what to use when a vault has no config, and the panel prints which of
+  the two it used.
 
 ## Testing
 
-`node --test src/search.test.js` — 18 cases covering `search.js`, `segmentBody`, and
-`backlinks`. Node's built-in runner, so there is nothing to install and still no
-`package.json`.
+`node --test src/search.test.js src/health.test.js` — 27 cases covering `search.js`,
+`segmentBody`, `backlinks` and `loadThresholds`. Node's built-in runner, so there is nothing
+to install and still no `package.json`. (`node --test src/` does not work — pass the files.)
 
 `frontmatter.js`, `model.js`, and `health.js` have no test file but are equally pure, and
 can be exercised from Node directly — they import cleanly and take plain objects.

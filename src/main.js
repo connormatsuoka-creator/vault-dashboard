@@ -12,7 +12,7 @@
 
 import { isSupported, pickVault, readVault, VaultAccessError } from "./vault-access.js";
 import { buildModel, segmentBody } from "./model.js";
-import { runHealthChecks, THRESHOLDS } from "./health.js";
+import { runHealthChecks, loadThresholds } from "./health.js";
 import { searchVault, MAX_RESULTS } from "./search.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
@@ -140,8 +140,13 @@ async function openVault() {
 // ---------------------------------------------------------------------------
 
 function render(model) {
-  renderHealth(runHealthChecks(model, THRESHOLDS));
-  renderThresholds(THRESHOLDS);
+  // The vault owns these now; health.js only holds a fallback. Read once and
+  // pass the same object to both, so the panel can never check against one set
+  // of numbers while printing another.
+  const thresholds = loadThresholds(model);
+
+  renderHealth(runHealthChecks(model, thresholds));
+  renderThresholds(thresholds);
   renderCounts(model);
   renderDomains(model);
   renderBrowseList("");
