@@ -32,6 +32,16 @@
     </header>
 
     <main class="app-main">
+      <!--
+        View switcher. Hidden until a vault is loaded, because until then there
+        is nothing to switch between and a dead control that looks live is worse
+        than no control.
+      -->
+      <nav id="view-nav" class="view-nav" aria-label="Views" hidden>
+        <button id="view-health" class="view-tab" type="button">Health</button>
+        <button id="view-browse" class="view-tab" type="button">Browse</button>
+      </nav>
+
       <!-- Shown when the browser cannot do this at all. -->
       <section id="unsupported" class="panel panel--error" hidden>
         <h2 class="panel-title">This browser can't open local folders</h2>
@@ -79,6 +89,48 @@
         <ul id="domains" class="bar-list"></ul>
 
         <button id="reload" class="button button--quiet" type="button">Open a different folder</button>
+      </section>
+
+      <!--
+        Browse. Two panes: what to look at, and what you are looking at.
+
+        Content renders as raw text on purpose. Obsidian and VS Code render this
+        vault's markdown better than this ever will; neither knows its ownership
+        map or its resolved link graph. The [[links]] inside the <pre> are made
+        navigable, which is the part nothing else does.
+      -->
+      <section id="browse" class="panel" hidden>
+        <div class="browse">
+          <div class="browse-side">
+            <input
+              id="search"
+              class="search-input"
+              type="search"
+              placeholder="Search topics, names, text…"
+              aria-label="Search the vault"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p id="search-meta" class="search-meta"></p>
+            <div id="browse-list" class="browse-list"></div>
+          </div>
+
+          <div class="browse-main">
+            <p id="file-empty" class="muted file-empty">
+              Pick a file to read it. <code>[[links]]</code> inside are clickable.
+            </p>
+
+            <article id="file-view" hidden>
+              <div class="file-head">
+                <h3 id="file-path" class="file-path"></h3>
+                <button id="file-back" class="button button--small" type="button" hidden>← Back</button>
+              </div>
+              <dl id="file-meta" class="file-meta"></dl>
+              <div id="file-backlinks" class="file-backlinks"></div>
+              <pre id="file-body" class="file-body"></pre>
+            </article>
+          </div>
+        </div>
       </section>
     </main>
 

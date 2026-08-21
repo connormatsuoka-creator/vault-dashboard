@@ -11,8 +11,9 @@
 // result stops being readable long before it stops being fast.
 
 import { isSupported, pickVault, readVault, VaultAccessError } from "./vault-access.js";
-import { buildModel } from "./model.js";
+import { buildModel, segmentBody } from "./model.js";
 import { runHealthChecks, THRESHOLDS } from "./health.js";
+import { searchVault, MAX_RESULTS } from "./search.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -39,6 +40,38 @@ const els = {
   counts: document.getElementById("counts"),
   domains: document.getElementById("domains"),
   reload: document.getElementById("reload"),
+
+  viewNav: document.getElementById("view-nav"),
+  viewHealth: document.getElementById("view-health"),
+  viewBrowse: document.getElementById("view-browse"),
+
+  browse: document.getElementById("browse"),
+  search: document.getElementById("search"),
+  searchMeta: document.getElementById("search-meta"),
+  browseList: document.getElementById("browse-list"),
+  fileEmpty: document.getElementById("file-empty"),
+  fileView: document.getElementById("file-view"),
+  filePath: document.getElementById("file-path"),
+  fileBack: document.getElementById("file-back"),
+  fileMeta: document.getElementById("file-meta"),
+  fileBacklinks: document.getElementById("file-backlinks"),
+  fileBody: document.getElementById("file-body"),
+};
+
+/** Panels that showOnly arbitrates between. */
+const PANELS = ["unsupported", "picker", "error", "loading", "summary", "browse"];
+
+/** The subset that means "a vault is open" — the switcher belongs to these. */
+const VIEWS = { summary: "viewHealth", browse: "viewBrowse" };
+
+/**
+ * Everything the browse view needs to remember. Deliberately small and plain:
+ * a path, and the trail that led to it.
+ */
+const state = {
+  model: null,
+  path: null,
+  history: [],
 };
 
 /**
@@ -47,8 +80,17 @@ const els = {
  * to chase once several handlers each hide and show things independently.
  */
 function showOnly(name) {
-  for (const key of ["unsupported", "picker", "error", "loading", "summary"]) {
+  for (const key of PANELS) {
     els[key].hidden = key !== name;
+  }
+
+  // The switcher's visibility and its selected state are decided here too. Two
+  // functions each owning part of "what is on screen" is how you end up with a
+  // nav pointing at a panel that isn't showing.
+  els.viewNav.hidden = !(name in VIEWS);
+  for (const [view, ref] of Object.entries(VIEWS)) {
+    if (name === view) els[ref].setAttribute("aria-current", "page");
+    else els[ref].removeAttribute("aria-current");
   }
 }
 
@@ -66,6 +108,13 @@ async function openVault() {
 
     const files = await readVault(handle);
     const model = buildModel(files);
+
+    // A different folder is a different vault: the open file and the trail that
+    // led to it belong to the old one.
+    state.model = model;
+    state.path = null;
+    state.history = [];
+    els.search.value = "";
 
     render(model);
     showOnly("summary");
@@ -95,6 +144,8 @@ function render(model) {
   renderThresholds(THRESHOLDS);
   renderCounts(model);
   renderDomains(model);
+  renderBrowseList("");
+  clearFile();
 }
 
 /**
@@ -282,12 +333,297 @@ function tally(values) {
 }
 
 // ---------------------------------------------------------------------------
+// Browse
+//
+// Two panes. The left decides what to look at — search results when there is a
+// query, the whole vault by domain when there isn't. The right shows it.
+//
+// Content renders as raw text by choice, not as a shortcut. Better markdown
+// readers already exist and none of them know this vault's ownership map or its
+// resolved link graph, which is the part worth building. What the <pre> adds
+// over any editor is that the [[links]] in it are navigable, and that a broken
+// one is visibly broken while you read.
+// ---------------------------------------------------------------------------
+
+/** Empty query lists the vault; a query searches it. */
+function renderBrowseList(query) {
+  if (!state.model) return;
+
+  const groups = query.trim()
+    ? searchResultGroups(query)
+    : domainGroups();
+
+  els.browseList.replaceChildren(...groups);
+  if (state.path) markCurrent(state.path);
+}
+
+function domainGroups() {
+  const model = state.model;
+  els.searchMeta.textContent = `${model.files.length} files in ${model.byDomain.size} domains`;
+
+  return [...model.byDomain.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([domain, files]) =>
+      group(
+        domain,
+        [...files]
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((f) => browseRow(f.path, f.name))
+      )
+    );
+}
+
+function searchResultGroups(query) {
+  const { groups, total, truncated } = searchVault(state.model, query, MAX_RESULTS);
+
+  els.searchMeta.textContent =
+    total === 0
+      ? "No matches"
+      : `${total} file${total === 1 ? "" : "s"}` + (truncated ? ` — ${truncated} not shown` : "");
+
+  return groups.map((g) =>
+    group(
+      g.label,
+      g.results.map((r) => browseRow(r.path, r.path, r))
+    )
+  );
+}
+
+function group(title, rows) {
+  const wrap = document.createElement("div");
+  const h = document.createElement("h4");
+  h.className = "browse-group-title";
+  h.textContent = title;
+  const ul = document.createElement("ul");
+  ul.className = "browse-items";
+  ul.append(...rows);
+  wrap.append(h, ul);
+  return wrap;
+}
+
+function browseRow(path, label, result) {
+  const li = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "browse-item";
+  button.dataset.path = path;
+
+  const name = document.createElement("span");
+  name.className = "browse-item-name";
+  name.textContent = label;
+  button.append(name);
+
+  if (result) {
+    const evidence = document.createElement("span");
+    evidence.className = "browse-item-evidence";
+    evidence.append(highlighted(result.evidence, result.offset, result.length));
+    if (result.extra > 0) {
+      const more = document.createElement("span");
+      more.textContent = `  +${result.extra} more in this file`;
+      evidence.append(more);
+    }
+    button.append(evidence);
+  }
+
+  button.addEventListener("click", () => openFile(path));
+  li.append(button);
+  return li;
+}
+
+/**
+ * Wrap the matched span in a <mark>, built from text nodes.
+ *
+ * The offsets come from search.js, which guarantees they select the query
+ * inside `evidence` — a test asserts exactly that, because a wrong offset
+ * highlights the wrong characters silently instead of failing.
+ */
+function highlighted(text, offset, length) {
+  const frag = document.createDocumentFragment();
+  frag.append(document.createTextNode(text.slice(0, offset)));
+
+  const mark = document.createElement("mark");
+  mark.className = "hit";
+  mark.textContent = text.slice(offset, offset + length);
+  frag.append(mark, document.createTextNode(text.slice(offset + length)));
+
+  return frag;
+}
+
+// ---------------------------------------------------------------------------
+// The file view
+// ---------------------------------------------------------------------------
+
+function openFile(path, push = true) {
+  const file = state.model?.byPath.get(path);
+  if (!file) return;
+
+  // Following a link from inside a file is what builds the trail. Re-opening
+  // the file you are already on is not a move.
+  if (push && state.path && state.path !== path) state.history.push(state.path);
+
+  state.path = path;
+  renderFile(file);
+  markCurrent(path);
+
+  // A link can be followed from the health panel's view later; opening one
+  // should always land you where the file actually is.
+  if (els.browse.hidden) showOnly("browse");
+
+  // Scroll position is per-page, not per-file. Following a link from halfway
+  // down a long file otherwise leaves you halfway down the *next* one, looking
+  // at the middle of a document with nothing to say you moved. It matters most
+  // in the stacked layout, where the file sits below the list entirely.
+  els.fileView.scrollIntoView({ block: "start" });
+}
+
+function clearFile() {
+  state.path = null;
+  state.history = [];
+  els.fileView.hidden = true;
+  els.fileEmpty.hidden = false;
+}
+
+function renderFile(file) {
+  els.fileEmpty.hidden = true;
+  els.fileView.hidden = false;
+
+  els.filePath.textContent = file.path;
+  els.fileBack.hidden = state.history.length === 0;
+
+  renderMeta(file);
+  renderBacklinks(file);
+  renderBody(file);
+}
+
+/** Frontmatter as it was written. Values stay strings; arrays get commas. */
+function renderMeta(file) {
+  const entries = Object.entries(file.data);
+
+  if (entries.length === 0) {
+    els.fileMeta.hidden = true;
+    return;
+  }
+  els.fileMeta.hidden = false;
+
+  els.fileMeta.replaceChildren(
+    ...entries.flatMap(([key, value]) => {
+      const dt = document.createElement("dt");
+      dt.textContent = key;
+      const dd = document.createElement("dd");
+      dd.textContent = Array.isArray(value) ? value.join(", ") : String(value);
+      return [dt, dd];
+    })
+  );
+}
+
+/**
+ * What points here. The other half of the link graph — forward links walk you
+ * out of a file, these walk you in, and together they answer the question the
+ * vault is organised around: if this moves, what breaks?
+ */
+function renderBacklinks(file) {
+  const sources = state.model.backlinks.get(file.path) ?? [];
+
+  if (sources.length === 0) {
+    els.fileBacklinks.replaceChildren();
+    return;
+  }
+
+  const title = document.createElement("h4");
+  title.className = "file-backlinks-title";
+  title.textContent = `Linked from ${sources.length} file${sources.length === 1 ? "" : "s"}`;
+
+  const ul = document.createElement("ul");
+  ul.className = "file-backlinks-list";
+  ul.append(
+    ...[...sources].sort().map((from) => {
+      const li = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "vlink";
+      button.textContent = from;
+      button.addEventListener("click", () => openFile(from));
+      li.append(button);
+      return li;
+    })
+  );
+
+  els.fileBacklinks.replaceChildren(title, ul);
+}
+
+function renderBody(file) {
+  const segments = segmentBody(file.body, resolutionsFor(file.path));
+
+  els.fileBody.replaceChildren(
+    ...segments.map((s) => (s.type === "text" ? document.createTextNode(s.value) : linkNode(s)))
+  );
+}
+
+/** target -> how the model resolved it, for this file's links only. */
+function resolutionsFor(path) {
+  const map = new Map();
+  for (const link of state.model.links) {
+    if (link.from === path) map.set(link.target, link);
+  }
+  return map;
+}
+
+/**
+ * A resolved link is a button; anything else is a span.
+ *
+ * That distinction is deliberate. A broken link has nowhere to go, and a
+ * control that looks live and does nothing is precisely the bug that made the
+ * health disclosures feel broken when the JavaScript was correct all along.
+ */
+function linkNode(segment) {
+  const label = `[[${segment.target}]]`;
+
+  if (segment.status === "resolved") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vlink";
+    button.textContent = label;
+    button.title = segment.resolvedPath;
+    button.addEventListener("click", () => openFile(segment.resolvedPath));
+    return button;
+  }
+
+  const span = document.createElement("span");
+  span.className = `vlink vlink--${segment.status === "ambiguous" ? "ambiguous" : "broken"}`;
+  span.textContent = label;
+  span.title =
+    segment.status === "ambiguous"
+      ? "Ambiguous — the name matches more than one file"
+      : "Broken — nothing in the vault answers to this";
+  return span;
+}
+
+function markCurrent(path) {
+  for (const button of els.browseList.querySelectorAll(".browse-item")) {
+    if (button.dataset.path === path) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 
 els.openVault.addEventListener("click", openVault);
 els.retry.addEventListener("click", openVault);
 els.reload.addEventListener("click", openVault);
+
+els.viewHealth.addEventListener("click", () => showOnly("summary"));
+els.viewBrowse.addEventListener("click", () => showOnly("browse"));
+
+// 34 files scanned per keystroke costs microseconds — a debounce would only add
+// latency and a timer to reason about.
+els.search.addEventListener("input", () => renderBrowseList(els.search.value));
+
+els.fileBack.addEventListener("click", () => {
+  const previous = state.history.pop();
+  if (previous) openFile(previous, false);
+});
 
 if (isSupported()) {
   showOnly("picker");

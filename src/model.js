@@ -96,7 +96,20 @@ export function buildModel(rawFiles) {
     }
   }
 
-  return { files, byPath, byBasename, byDomain, byTopic, links, warnings };
+  // ---- 4. Invert the links -----------------------------------------------
+  // path -> [paths that link to it]. Inverted from `links` rather than gathered
+  // in a second pass, so the two directions cannot disagree about what a link
+  // is. Only resolved links participate: a broken link points at no file, so
+  // there is nothing to hang a backlink on.
+  const backlinks = new Map(files.map((f) => [f.path, []]));
+  for (const link of links) {
+    if (link.status !== "resolved") continue;
+    const sources = backlinks.get(link.resolvedPath);
+    // A file that links to the same target twice is one backlink, not two.
+    if (sources && !sources.includes(link.from)) sources.push(link.from);
+  }
+
+  return { files, byPath, byBasename, byDomain, byTopic, links, backlinks, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -150,32 +163,117 @@ function resolveLink(target, fromPath, byPath, byBasename) {
 }
 
 /**
- * Pull [[targets]] out of markdown body text.
+ * The one link pattern, and the one rule for which lines may contain a link.
  *
- * Code BLOCKS are stripped first. Files that document the vault's own
- * conventions contain [[...]] inside example commands, and those are
- * illustrations, not links — counting them would make the file that explains
- * the link audit fail it.
- *
- * Inline code spans are deliberately NOT stripped. The vault writes almost
- * every link as `[[target]]` — backticked for visual weight — so 62 of its 63
- * links live inside inline code. Stripping spans finds zero links in a vault
- * full of them. The block rules above already cover the documentation case,
- * which is the only place illustrative brackets actually appear.
+ * Extraction (for the audit) and segmentation (for rendering) both build from
+ * these. If they disagreed, the browse view would linkify something the audit
+ * never checked, or show as plain text something the audit counted — and the
+ * discrepancy would be invisible from either side.
  */
-function extractLinkTargets(body) {
-  const prose = body
-    .replace(/```[\s\S]*?```/g, "") // fenced code blocks
-    .replace(/^ {4,}.*$/gm, ""); // indented code blocks
+const LINK_SOURCE = String.raw`\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]`;
+const linkRegex = () => new RegExp(LINK_SOURCE, "g"); // fresh: /g carries lastIndex
 
+/**
+ * Split body text into lines, marking which are code.
+ *
+ * Code BLOCKS are excluded. Files that document the vault's own conventions
+ * contain [[...]] inside example commands, and those are illustrations, not
+ * links — counting them would make the file that explains the link audit fail
+ * it.
+ *
+ * Inline code spans are deliberately NOT excluded. The vault writes almost
+ * every link as `[[target]]` — backticked for visual weight — so nearly every
+ * link lives inside an inline span. Excluding spans finds zero links in a vault
+ * full of them. The block rule already covers the documentation case, which is
+ * the only place illustrative brackets actually appear.
+ */
+function classifyLines(body) {
+  let inFence = false;
+  return body.split(/\r?\n/).map((line) => {
+    // The fence line itself is code, and it flips the state for what follows.
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      return { line, isCode: true };
+    }
+    return { line, isCode: inFence || /^ {4,}/.test(line) };
+  });
+}
+
+/** Pull [[targets]] out of markdown body text, skipping code. */
+function extractLinkTargets(body) {
   const targets = [];
-  const re = /\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g; // ignores |alias and #heading
-  let match;
-  while ((match = re.exec(prose)) !== null) {
-    const target = match[1].trim();
-    if (target) targets.push(target);
+  for (const { line, isCode } of classifyLines(body)) {
+    if (isCode) continue;
+    const re = linkRegex();
+    let match;
+    while ((match = re.exec(line)) !== null) {
+      const target = match[1].trim();
+      if (target) targets.push(target);
+    }
   }
   return targets;
+}
+
+/**
+ * Split body text into renderable segments, preserving every character.
+ *
+ * Extraction above throws positions away, which is fine for counting and
+ * useless for rendering. This keeps the text intact and marks where the links
+ * are, so the browse view can make them navigable without rebuilding the
+ * document — and without a markdown parser, which is a large surface that only
+ * fails in a browser.
+ *
+ * Concatenating every segment's text reproduces the body, with line endings
+ * normalised to \n. That is the property to hold onto: rendering can never
+ * silently drop content it did not understand.
+ *
+ * @param {string} body
+ * @param {Map<string, {status: string, resolvedPath: string|null}>} resolutions
+ * @returns {Array<{type:'text',value:string}|{type:'link',target:string,status:string,resolvedPath:string|null}>}
+ */
+export function segmentBody(body, resolutions = new Map()) {
+  const segments = [];
+  let pending = "";
+
+  const flush = () => {
+    if (pending) segments.push({ type: "text", value: pending });
+    pending = "";
+  };
+
+  const lines = classifyLines(body);
+
+  lines.forEach(({ line, isCode }, i) => {
+    const newline = i < lines.length - 1 ? "\n" : "";
+
+    if (isCode) {
+      pending += line + newline;
+      return;
+    }
+
+    const re = linkRegex();
+    let cursor = 0;
+    let match;
+    while ((match = re.exec(line)) !== null) {
+      const target = match[1].trim();
+      if (!target) continue; // matches extractLinkTargets: [[  ]] is not a link
+
+      pending += line.slice(cursor, match.index);
+      flush();
+
+      // A target absent from the map was never resolved by the model — which
+      // means this body was segmented against the wrong file's links. Say so
+      // rather than rendering it as though it worked.
+      const r = resolutions.get(target) ?? { status: "unknown", resolvedPath: null };
+      segments.push({ type: "link", target, status: r.status, resolvedPath: r.resolvedPath });
+
+      cursor = match.index + match[0].length;
+    }
+
+    pending += line.slice(cursor) + newline;
+  });
+
+  flush();
+  return segments;
 }
 
 // ---------------------------------------------------------------------------
