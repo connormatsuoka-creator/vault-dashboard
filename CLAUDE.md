@@ -2,7 +2,9 @@
 
 ## Context lives in the vault, not here
 
-**`C:\Users\squis\second-brain`** — read its `CLAUDE.md` first.
+**Read the vault's `CLAUDE.md` first.** Where the vault lives is owned by
+`~/.claude/CLAUDE.md`, which is already loaded in every session. This file does not
+restate that path, for the same reason it does not restate anything else.
 
 Why this project exists, why it is hosted publicly, why thresholds are duplicated,
 what is built and what is next: all in `projects/vault-dashboard/`. **Do not restate any
