@@ -62,14 +62,18 @@ needed to see a change immediately after pushing.
 
 ## Testing
 
-`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 75 cases
-covering search, `segmentBody`, backlinks, `loadThresholds`, the graph and markdown. Node's built-in runner, so there is nothing
-to install and still no `package.json`. (`node --test src/` does not work — pass the files.)
+`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 82 cases
+covering search, `segmentBody`, backlinks, `loadThresholds`, `lineCount`, the graph and
+markdown. Node's built-in runner, so there is nothing to install and still no `package.json`.
 
-`frontmatter.js`, `model.js`, and `health.js` have no test file but are equally pure, and
-can be exercised from Node directly — they import cleanly and take plain objects.
+`frontmatter.js` and `health.js` have no test file but are equally pure, and can be
+exercised from Node directly — they import cleanly and take plain objects.
 
 **`vault-access.js` and the DOM rendering in `main.js` cannot be tested that way.** Both
-need a real browser and a real folder-pick, which requires a human gesture. Every bug that
-has reached the browser so far has been in exactly those two, because the pure modules got
-tests and the interactive layer did not.
+need a real browser and a real folder-pick, which requires a human gesture.
+
+**Pure-but-untested is not safe either**, and this file used to claim otherwise — that every
+bug reaching the browser had lived in those two modules. `lineCount` disproved it on
+2026-08-22: in `model.js`, pure and importable, it counted a file's trailing newline as a
+line and reported all 35 vault files one over, including a false `150/150` that nearly
+forced a split of a 149-line file. It had no test because nothing there did.

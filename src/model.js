@@ -53,7 +53,7 @@ export function buildModel(rawFiles) {
       body,
       hasFrontmatter,
       // Counted from the raw text, not the body — cap rules apply to whole files.
-      lineCount: text.split(/\r?\n/).length,
+      lineCount: countLines(text),
       linkTargets: extractLinkTargets(body),
     };
   });
@@ -294,4 +294,19 @@ function dirname(path) {
 function domainOf(path) {
   const i = path.indexOf("/");
   return i === -1 ? ROOT_DOMAIN : path.slice(0, i);
+}
+
+/**
+ * Lines in a file, meaning what `wc -l` and the vault's caps mean by it.
+ *
+ * One trailing newline terminates the last line rather than starting a new one.
+ * Splitting without stripping it counts an empty element that is not a line, which
+ * reported every file in the vault one over its real length — including a false
+ * 150/150 on a `system/decisions.md` of 149 lines, which is the difference between
+ * "at the cap, split it" and "one line of room". An unterminated final line still
+ * counts, so "a\nb" and "a\nb\n" are both 2.
+ */
+function countLines(text) {
+  if (text === "") return 0;
+  return text.replace(/\r?\n$/, "").split(/\r?\n/).length;
 }
