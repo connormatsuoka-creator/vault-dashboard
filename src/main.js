@@ -16,6 +16,7 @@ import { runHealthChecks, loadThresholds } from "./health.js";
 import { searchVault, MAX_RESULTS } from "./search.js";
 import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
+import { buildChronology, timelineScene } from "./chronology.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -47,6 +48,7 @@ const els = {
   viewHealth: document.getElementById("view-health"),
   viewBrowse: document.getElementById("view-browse"),
   viewGraph: document.getElementById("view-graph"),
+  viewTimeline: document.getElementById("view-timeline"),
 
   browse: document.getElementById("browse"),
   search: document.getElementById("search"),
@@ -70,13 +72,19 @@ const els = {
   graphHome: document.getElementById("graph-home"),
   graphFull: document.getElementById("graph-full"),
   graphOpen: document.getElementById("graph-open"),
+
+  timeline: document.getElementById("timeline"),
+  timelineSvg: document.getElementById("timeline-svg"),
+  timelineCaption: document.getElementById("timeline-caption"),
+  timelineDomain: document.getElementById("timeline-domain"),
+  timelineUndated: document.getElementById("timeline-undated"),
 };
 
 /** Panels that showOnly arbitrates between. */
-const PANELS = ["unsupported", "picker", "error", "loading", "summary", "browse", "graph"];
+const PANELS = ["unsupported", "picker", "error", "loading", "summary", "browse", "graph", "timeline"];
 
 /** The subset that means "a vault is open" — the switcher belongs to these. */
-const VIEWS = { summary: "viewHealth", browse: "viewBrowse", graph: "viewGraph" };
+const VIEWS = { summary: "viewHealth", browse: "viewBrowse", graph: "viewGraph", timeline: "viewTimeline" };
 
 /**
  * Everything the browse view needs to remember. Deliberately small and plain:
@@ -92,6 +100,9 @@ const state = {
   // afford.
   graph: null,
   positions: null,
+
+  // Computed once per vault, like the graph and for the same reason.
+  chronology: null,
   view: { mode: "domains" },
 
   // Raw is the default. It is the view with no parser between you and the
@@ -181,6 +192,10 @@ function render(model) {
   renderBrowseList("");
   clearFile();
   renderGraph();
+
+  state.chronology = buildChronology(model);
+  renderTimelineDomains(state.chronology);
+  renderTimeline();
 }
 
 /**
@@ -984,6 +999,244 @@ function frameToContent(current) {
 // Start
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Timeline
+//
+// chronology.js decided every position; this only draws. The axis is piecewise,
+// so a break band is chrome laid over the plot rather than a gap in it — a bar
+// crossing one continued through a stretch where nothing was recorded, and
+// hiding that would be a different claim than the data supports.
+// ---------------------------------------------------------------------------
+
+const TL = { minWidth: 760, labelWidth: 232, rightPad: 28, top: 46, rowHeight: 24, bottom: 30, minTickGap: 54 };
+
+/** An SVG <title> is the tooltip, and it is also what a screen reader reads. */
+function titled(node, text) {
+  const title = svg("title");
+  title.textContent = text;
+  node.append(title);
+  return node;
+}
+
+/** Long paths lose their middle, not their end — the filename is the identifying part. */
+function shortPath(path, max = 34) {
+  if (path.length <= max) return path;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const room = max - name.length - 2;
+  return room > 3 ? `${path.slice(0, room)}…/${name}` : `…${name.slice(-(max - 1))}`;
+}
+
+function renderTimeline() {
+  if (!state.chronology) return;
+
+  const view = els.timelineDomain.value ? { domain: els.timelineDomain.value } : {};
+  const scene = timelineScene(state.chronology, view);
+  els.timelineCaption.textContent = scene.caption;
+
+  // Fill the panel when it is wide enough, scroll only below minWidth.
+  const available = els.timelineSvg.parentElement.clientWidth;
+  const width = Math.max(TL.minWidth, available);
+
+  const plotWidth = width - TL.labelWidth - TL.rightPad;
+  const at = (unit) => TL.labelWidth + unit * plotWidth;
+  const height = TL.top + scene.rows.length * TL.rowHeight + TL.bottom;
+  const rowY = (i) => TL.top + i * TL.rowHeight;
+
+  // Drawn 1:1 and scrolled, rather than scaled to fit. Scaling to fit is what
+  // shrinks an 11px label to 7px on a narrow screen.
+  els.timelineSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  els.timelineSvg.setAttribute("width", width);
+  els.timelineSvg.setAttribute("height", height);
+
+  const parts = [];
+
+  const defs = svg("defs");
+  const hatch = svg("pattern", {
+    id: "tl-hatch",
+    patternUnits: "userSpaceOnUse",
+    width: 5,
+    height: 5,
+    patternTransform: "rotate(45)",
+  });
+  hatch.append(svg("rect", { width: 5, height: 5, class: "tl-hatch-bg" }));
+  hatch.append(svg("line", { x1: 0, y1: 0, x2: 0, y2: 5, class: "tl-hatch-line" }));
+  defs.append(hatch);
+  parts.push(defs);
+
+  if (scene.empty || scene.rows.length === 0) {
+    const empty = svg("text", { x: width / 2, y: 60, class: "tl-empty", "text-anchor": "middle" });
+    empty.textContent = scene.empty ? "No file carries an event date." : "No dated files in this domain.";
+    els.timelineSvg.replaceChildren(empty);
+    renderUndated(scene.undated);
+    return;
+  }
+
+  const plotTop = TL.top - 14;
+  const plotBottom = height - TL.bottom + 6;
+
+  // ---- break bands, behind everything ------------------------------------
+  for (const band of scene.axis.breaks) {
+    const x0 = at(band.x0);
+    const width = Math.max(2, at(band.x1) - x0);
+    parts.push(
+      titled(
+        svg("rect", { x: x0, y: plotTop, width, height: plotBottom - plotTop, class: "tl-break" }),
+        `${band.label} with no dated entries — the axis is compressed here`
+      )
+    );
+    // Rotated, so a nine-year label fits inside a 50px band without colliding
+    // with its neighbours.
+    const label = svg("text", {
+      x: x0 + width / 2,
+      y: (plotTop + plotBottom) / 2,
+      class: "tl-break-label",
+      "text-anchor": "middle",
+      transform: `rotate(-90 ${x0 + width / 2} ${(plotTop + plotBottom) / 2})`,
+    });
+    label.textContent = band.label;
+    parts.push(label);
+  }
+
+  // ---- axis ticks ---------------------------------------------------------
+  let lastTickX = -Infinity;
+  for (const tick of scene.axis.ticks) {
+    const x = at(tick.x);
+    if (x - lastTickX < TL.minTickGap) continue;
+    lastTickX = x;
+    parts.push(svg("line", { x1: x, y1: TL.top - 10, x2: x, y2: plotBottom, class: "tl-tick" }));
+    const label = svg("text", { x, y: TL.top - 18, class: "tl-tick-label", "text-anchor": "middle" });
+    label.textContent = tick.label;
+    parts.push(label);
+  }
+
+  // ---- today --------------------------------------------------------------
+  if (scene.today !== null) {
+    const x = at(scene.today);
+    parts.push(titled(svg("line", { x1: x, y1: plotTop, x2: x, y2: plotBottom, class: "tl-today" }), "today"));
+    const label = svg("text", { x, y: plotBottom + 16, class: "tl-today-label", "text-anchor": "middle" });
+    label.textContent = "today";
+    parts.push(label);
+  }
+
+  // ---- rows ---------------------------------------------------------------
+  scene.rows.forEach((row, i) => {
+    const y = rowY(i);
+    const group = svg("g", { class: "tl-row", tabindex: "0", role: "button" });
+    const open = () => openFile(row.path);
+    group.addEventListener("click", open);
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+
+    // A full-width hit area, so the whole row is clickable rather than only the
+    // few pixels a one-day mark occupies.
+    // The tooltip lives on the hit area, not on the label. A <title> INSIDE a
+    // <text> element is valid SVG but doubles that element’s textContent, which
+    // makes the label unreadable to anything that reads the tree.
+    group.append(
+      titled(svg("rect", { x: 0, y, width, height: TL.rowHeight, class: "tl-hit" }), row.path)
+    );
+
+    const label = svg("text", { x: TL.labelWidth - 12, y: y + 16, class: "tl-label", "text-anchor": "end" });
+    label.textContent = shortPath(row.path);
+    group.append(label);
+
+    if (row.bar) {
+      // One rect per part. A hatched part means the author wrote a month or a
+      // year, so the exact edge inside it is not known — drawing it solid would
+      // claim a precision the vault does not have.
+      const tip =
+        `${row.bar.label} · ${row.bar.duration}` +
+        (row.bar.uncertain ? " · hatched = imprecise, exact edge unknown" : "") +
+        (row.bar.clamped ? " · shown only up to today" : "");
+      for (const part of row.bar.parts) {
+        const x0 = at(part.x0);
+        const width = Math.max(2, at(part.x1) - x0);
+        const bar = svg("rect", {
+          x: x0,
+          y: y + 7,
+          width,
+          height: 9,
+          rx: 2,
+          class: `tl-bar${part.certain ? "" : " tl-bar--uncertain"}${row.bar.ongoing ? " tl-bar--ongoing" : ""}`,
+        });
+        group.append(titled(bar, tip));
+      }
+    }
+
+    for (const mark of row.marks) {
+      const dot = svg("circle", {
+        cx: at(mark.x),
+        cy: y + 11.5,
+        r: 4,
+        class: `tl-mark${mark.future ? " tl-mark--future" : ""}`,
+      });
+      group.append(titled(dot, `${mark.iso}${mark.future ? " (ahead of today)" : ""} — ${mark.text}`));
+    }
+
+    parts.push(group);
+  });
+
+  els.timelineSvg.replaceChildren(...parts);
+  renderUndated(scene.undated);
+}
+
+/**
+ * The files with no event date.
+ *
+ * Listed rather than counted-and-hidden, and never given a position: updated:
+ * is metadata about the file, not a claim about when anything happened.
+ */
+function renderUndated(undated) {
+  if (!undated.length) {
+    els.timelineUndated.replaceChildren();
+    return;
+  }
+
+  const title = document.createElement("h3");
+  title.className = "tl-undated-title";
+  title.textContent = `${undated.length} file${undated.length === 1 ? "" : "s"} with no event date`;
+
+  const note = document.createElement("p");
+  note.className = "tl-undated-note";
+  note.textContent =
+    "These carry no occurred: span and no date in their prose. They are not placed on the axis, because updated: records when the file was edited, not when anything happened.";
+
+  const list = document.createElement("ul");
+  list.className = "tl-undated-list";
+  for (const item of undated) {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tl-undated-item";
+    button.textContent = item.path;
+    if (item.updated) button.title = `updated: ${item.updated}`;
+    button.addEventListener("click", () => openFile(item.path));
+    li.append(button);
+    list.append(li);
+  }
+
+  els.timelineUndated.replaceChildren(title, note, list);
+}
+
+/** Domain options are built once per vault, so switching never rebuilds them. */
+function renderTimelineDomains(chronology) {
+  const domains = [...new Set(chronology.tracks.map((t) => t.domain))].sort();
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = "All domains";
+  const options = domains.map((domain) => {
+    const option = document.createElement("option");
+    option.value = domain;
+    option.textContent = domain;
+    return option;
+  });
+  els.timelineDomain.replaceChildren(all, ...options);
+}
+
 els.openVault.addEventListener("click", openVault);
 els.retry.addEventListener("click", openVault);
 els.reload.addEventListener("click", openVault);
@@ -991,6 +1244,22 @@ els.reload.addEventListener("click", openVault);
 els.viewHealth.addEventListener("click", () => showOnly("summary"));
 els.viewBrowse.addEventListener("click", () => showOnly("browse"));
 els.viewGraph.addEventListener("click", () => showOnly("graph"));
+els.viewTimeline.addEventListener("click", () => {
+  showOnly("timeline");
+  // The width is measured from the panel, which is display:none until now — so
+  // the first render inside render() always measures zero and falls back to the
+  // minimum. Re-render once it can actually be measured.
+  renderTimeline();
+});
+
+els.timelineDomain.addEventListener("change", renderTimeline);
+
+// The width above is measured, so it has to be re-measured when the panel
+// changes size. Redrawing ~20 rows is microseconds; a debounce would only add
+// a timer to reason about.
+window.addEventListener("resize", () => {
+  if (!els.timeline.hidden) renderTimeline();
+});
 
 els.graphHome.addEventListener("click", () => setGraphView({ mode: "domains" }));
 els.graphFull.addEventListener("click", () => setGraphView({ mode: "full" }));

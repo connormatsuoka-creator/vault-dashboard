@@ -335,6 +335,9 @@ code {
   margin: 0 auto;
   display: flex;
   gap: var(--space-2);
+  /* Four tabs no longer fit on a 375px screen. Wrapping is what keeps the page
+   * itself from scrolling sideways. */
+  flex-wrap: wrap;
 }
 
 .view-tab {
@@ -916,4 +919,194 @@ code {
   font-size: 0.92em;
   padding: 0.1em 0.35em;
   background: var(--surface-raised);
+}
+
+/* ---------------------------------------------------------------------------
+ * Timeline
+ *
+ * Presentation only, on the same terms as the graph above: chronology.js
+ * decided every position, and nothing here changes what a click does.
+ * --------------------------------------------------------------------------- */
+
+.tl-domain-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  align-self: center;
+}
+
+.tl-domain {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+
+/* The axis is wide before it is narrow. It scrolls inside its own box so the
+ * page itself never does. */
+.tl-scroll {
+  overflow-x: auto;
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+/* Width and height come from the renderer, matching the viewBox 1:1, so text
+ * renders at the size it was designed at. .tl-scroll handles narrow screens. */
+.tl-svg {
+  display: block;
+}
+
+.tl-empty {
+  fill: var(--text-muted);
+  font-size: 14px;
+}
+
+/* A collapsed stretch. Drawn as a band OVER the plot rather than a gap in it,
+ * because a bar crossing one continued through — there is simply nothing dated
+ * inside it. The label states the duration the compression removed. */
+.tl-break {
+  fill: var(--bg);
+  opacity: 0.55;
+}
+
+.tl-break-label {
+  fill: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.tl-tick {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.tl-tick-label {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
+.tl-today {
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+
+.tl-today-label {
+  fill: var(--warn);
+  font-size: 10px;
+}
+
+.tl-hit {
+  fill: transparent;
+}
+
+.tl-row {
+  cursor: pointer;
+}
+
+.tl-row:hover .tl-hit,
+.tl-row:focus-visible .tl-hit {
+  fill: var(--surface);
+}
+
+.tl-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tl-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.tl-row:hover .tl-label {
+  fill: var(--text);
+}
+
+/* An occurred: span. Precision is already width — a year-precision bar is a
+ * year wide — so the tint only says how exact the authored value was. */
+.tl-bar {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+
+/* The author wrote a month or a year, so the exact edge inside this stretch is
+ * unknown. Hatching says that; fading would only say "less important". */
+.tl-bar--uncertain {
+  fill: url(#tl-hatch);
+  opacity: 0.9;
+}
+
+.tl-hatch-bg {
+  fill: var(--surface-raised);
+}
+
+.tl-hatch-line {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.tl-bar--ongoing {
+  opacity: 0.6;
+}
+
+/* A date mined from prose. */
+.tl-mark {
+  fill: var(--text);
+  stroke: var(--surface-raised);
+  stroke-width: 1.5;
+}
+
+/* Ahead of today: a commitment, not a thing that happened. Hollow, so it never
+ * reads as history. */
+.tl-mark--future {
+  fill: none;
+  stroke: var(--warn);
+  stroke-width: 2;
+}
+
+.tl-undated {
+  margin-top: var(--space-4);
+}
+
+.tl-undated-title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.tl-undated-note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  max-width: 60ch;
+}
+
+.tl-undated-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tl-undated-item {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+
+.tl-undated-item:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }

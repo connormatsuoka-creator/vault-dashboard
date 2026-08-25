@@ -28,6 +28,8 @@
 // inside the check functions — that is what closes the door.
 // ---------------------------------------------------------------------------
 
+import { isIsoDate, isOccurred } from "./chronology.js";
+
 export const THRESHOLDS = {
   source: "vault CLAUDE.md — Size caps and Staleness",
   caps: { router: 80, index: 40, leaf: 150 },
@@ -413,22 +415,13 @@ function checkDateFormats(model) {
 // imprecision is the one thing this vault's date schema exists to prevent.
 // ---------------------------------------------------------------------------
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const PART = /^\d{4}(-\d{2}(-\d{2})?)?$/;
-
-function isIsoDate(value) {
-  return typeof value === "string" && ISO_DATE.test(value) && !Number.isNaN(Date.parse(value));
-}
-
-/** "2024" | "2024-06" | "2024-06-14" | "2024-06/2024-12" | "2026-08-15/" */
-function isOccurred(value) {
-  if (typeof value !== "string" || value === "") return false;
-  const [start, end, ...rest] = value.split("/");
-  if (rest.length) return false;
-  if (!PART.test(start)) return false;
-  if (end === undefined || end === "") return true; // no end, or ongoing
-  return PART.test(end);
-}
+// The grammar itself now lives in chronology.js, which is the module that has
+// to fully parse these values rather than only validate them. Two definitions
+// of what a valid date is would let this panel and the timeline disagree about
+// the same string - the failure the shared LINK_SOURCE regex exists to prevent.
+//
+// It is also stricter than the regex it replaced: "2026-02-30" matches the
+// shape and is not a day, and is now rejected.
 
 function daysSince(isoDate, today) {
   if (!isIsoDate(isoDate)) return null;
