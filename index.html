@@ -14,10 +14,19 @@
       That is the whole security argument for hosting this publicly: the page
       reads your vault from disk into memory, and there is nowhere for that data
       to go. Not "we promise not to send it" — the browser refuses to.
+
+      font-src 'self' permits a typeface served from this origin, and nothing
+      else — no CDN, no Google Fonts, which would be a real cross-origin egress
+      change rather than this one. It widens the attack surface by nothing,
+      because the only channel it could theoretically open — encoding data into
+      a same-origin URL and reading it back out of the host's access log — is
+      already open through img-src 'self', and needs script execution on this
+      page before it means anything. Cross-origin egress stays absolute:
+      connect-src is unlisted, so fetch, XHR and WebSockets all inherit 'none'.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'"
     />
 
     <title>Vault Dashboard</title>
