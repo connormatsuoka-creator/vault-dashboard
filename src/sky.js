@@ -119,3 +119,53 @@ export function bucketLighting(bucket, count = 24, offset = 32) {
     cy: Number((50 + Math.sin(angle) * offset).toFixed(1)),
   };
 }
+
+/**
+ * Scatter a band of dust across a stretch of a timeline row.
+ *
+ * This draws an IMPRECISE span end: the author wrote a month or a year, so the
+ * exact edge inside that stretch is unknown. A solid bar would claim precision
+ * the vault does not have, and a hatch says "pattern" rather than "unsure".
+ * Particles say it plainly — the same way a diffuse object on a star chart is
+ * distinct from a point source.
+ *
+ * Density RAMPS toward the certain end, and that is semantic rather than
+ * decorative: the closer to the stretch we know the span was running, the more
+ * likely it was running there too.
+ *
+ * `certainSide` says which side the known part is on, which is the one way of
+ * phrasing it that cannot be read backwards. A HEAD sits left of the core, so
+ * its certainty is to the "right"; a TAIL sits right of it, so "left".
+ *
+ * Deterministic for the same reason the starfield is: this redraws on every
+ * filter change, and particles that reshuffle would make the row crawl.
+ *
+ * @returns {Array<{x:number, y:number, r:number, opacity:number}>}
+ */
+export function dustCloud({ x0, x1, height, seed = 7, density = 1.4, certainSide = "left" }) {
+  const width = x1 - x0;
+  if (!(width > 0) || !(height > 0)) return [];
+
+  const rand = seeded(seed);
+  // A floor, because the narrowest imprecise stretch still has to read as
+  // uncertain rather than as a speck.
+  const count = Math.max(8, Math.round(width * density));
+  const grains = [];
+
+  for (let i = 0; i < count; i++) {
+    // Squaring a uniform draw concentrates it near zero; which end that lands
+    // on is what certainSide decides.
+    const bias = rand() ** 2;
+    const along = certainSide === "left" ? bias : 1 - bias;
+    // 1 at the certain edge, 0 at the unknown one.
+    const nearness = certainSide === "left" ? 1 - along : along;
+
+    grains.push({
+      x: Number((x0 + along * width).toFixed(2)),
+      y: Number((rand() * height).toFixed(2)),
+      r: Number((0.5 + rand() * 0.85).toFixed(2)),
+      opacity: Number((0.25 + nearness * 0.5).toFixed(2)),
+    });
+  }
+  return grains;
+}

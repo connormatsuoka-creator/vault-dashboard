@@ -971,6 +971,18 @@ code {
   border-radius: var(--radius-sm);
 }
 
+/* color-scheme: dark is set and inherited, and the scrollbar still came out
+ * light - scrollbar-color: auto does not reliably follow it on every platform.
+ * Naming the colours is the only way to be sure a bright bar never cuts across
+ * a design that is otherwise all void. */
+.tl-scroll,
+.browse-list,
+.file-body,
+.file-rendered {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) var(--surface-raised);
+}
+
 /* Width and height come from the renderer, matching the viewBox 1:1, so text
  * renders at the size it was designed at. .tl-scroll handles narrow screens. */
 .tl-svg {
@@ -985,9 +997,11 @@ code {
 /* A collapsed stretch. Drawn as a band OVER the plot rather than a gap in it,
  * because a bar crossing one continued through — there is simply nothing dated
  * inside it. The label states the duration the compression removed. */
+/* A void: a stretch with nothing dated in it. Darker than the plot around it,
+ * because that is what it is. */
 .tl-break {
   fill: var(--bg);
-  opacity: 0.55;
+  opacity: 0.75;
 }
 
 .tl-break-label {
@@ -1006,14 +1020,16 @@ code {
   font-size: 10px;
 }
 
+/* Now: the observer’s position. It takes the star’s colour because it is the
+ * one moment everything else is measured from. */
 .tl-today {
-  stroke: var(--warn);
+  stroke: var(--star);
   stroke-width: 1.5;
   stroke-dasharray: 3 3;
 }
 
 .tl-today-label {
-  fill: var(--warn);
+  fill: var(--star);
   font-size: 10px;
 }
 
@@ -1054,18 +1070,11 @@ code {
 
 /* The author wrote a month or a year, so the exact edge inside this stretch is
  * unknown. Hatching says that; fading would only say "less important". */
-.tl-bar--uncertain {
-  fill: url(#tl-hatch);
-  opacity: 0.9;
-}
-
-.tl-hatch-bg {
-  fill: var(--surface-raised);
-}
-
-.tl-hatch-line {
-  stroke: var(--accent);
-  stroke-width: 2.5;
+/* An imprecise span end, drawn as dust rather than as a pattern. A diffuse
+ * object beside a point source is how a star chart says "we know roughly where
+ * this is", which is exactly the claim being made. */
+.tl-dust circle {
+  fill: var(--accent);
 }
 
 .tl-bar--ongoing {
@@ -1073,17 +1082,20 @@ code {
 }
 
 /* A date mined from prose. */
+/* A dated entry in the prose: a point source, sharp against the dust. */
 .tl-mark {
-  fill: var(--text);
+  fill: var(--moon-lit);
   stroke: var(--surface-raised);
   stroke-width: 1.5;
 }
 
 /* Ahead of today: a commitment, not a thing that happened. Hollow, so it never
  * reads as history. */
+/* Ahead of now: light that has not arrived. Hollow, so it can never be
+ * mistaken for something that happened. */
 .tl-mark--future {
   fill: none;
-  stroke: var(--warn);
+  stroke: var(--star);
   stroke-width: 2;
 }
 

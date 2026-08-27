@@ -18,7 +18,7 @@ import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
 import { buildChronology, timelineScene } from "./chronology.js";
 import { icon, setIconLabel } from "./icons.js";
-import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting } from "./sky.js";
+import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting, dustCloud } from "./sky.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -1214,18 +1214,6 @@ function renderTimeline() {
 
   const parts = [];
 
-  const defs = svg("defs");
-  const hatch = svg("pattern", {
-    id: "tl-hatch",
-    patternUnits: "userSpaceOnUse",
-    width: 5,
-    height: 5,
-    patternTransform: "rotate(45)",
-  });
-  hatch.append(svg("rect", { width: 5, height: 5, class: "tl-hatch-bg" }));
-  hatch.append(svg("line", { x1: 0, y1: 0, x2: 0, y2: 5, class: "tl-hatch-line" }));
-  defs.append(hatch);
-  parts.push(defs);
 
   if (scene.empty || scene.rows.length === 0) {
     const empty = svg("text", { x: width / 2, y: 60, class: "tl-empty", "text-anchor": "middle" });
@@ -1309,26 +1297,43 @@ function renderTimeline() {
     group.append(label);
 
     if (row.bar) {
-      // One rect per part. A hatched part means the author wrote a month or a
-      // year, so the exact edge inside it is not known — drawing it solid would
-      // claim a precision the vault does not have.
+      // A certain stretch is a solid bar. An imprecise one is DUST: the author
+      // wrote a month or a year, so the exact edge inside it is unknown, and a
+      // solid bar would claim a precision the vault does not have. Dust says
+      // that plainly, where a hatch said "pattern".
       const tip =
         `${row.bar.label} · ${row.bar.duration}` +
-        (row.bar.uncertain ? " · hatched = imprecise, exact edge unknown" : "") +
+        (row.bar.uncertain ? " · dust = imprecise, exact edge unknown" : "") +
         (row.bar.clamped ? " · shown only up to today" : "");
-      for (const part of row.bar.parts) {
+
+      row.bar.parts.forEach((part, i) => {
         const x0 = at(part.x0);
         const width = Math.max(2, at(part.x1) - x0);
-        const bar = svg("rect", {
-          x: x0,
-          y: y + 7,
-          width,
-          height: 9,
-          rx: 2,
-          class: `tl-bar${part.certain ? "" : " tl-bar--uncertain"}${row.bar.ongoing ? " tl-bar--ongoing" : ""}`,
-        });
-        group.append(titled(bar, tip));
-      }
+
+        if (part.certain) {
+          group.append(
+            titled(
+              svg("rect", { x: x0, y: y + 7, width, height: 9, rx: 2, class: `tl-bar${row.bar.ongoing ? " tl-bar--ongoing" : ""}` }),
+              tip
+            )
+          );
+          return;
+        }
+
+        // Which side the known stretch is on decides which way the dust
+        // thickens. A first part is a head, so its core is to the right.
+        const cloud = svg("g", { class: "tl-dust" });
+        for (const grain of dustCloud({
+          x0,
+          x1: x0 + width,
+          height: 13,
+          seed: 97 + i * 31 + Math.round(x0),
+          certainSide: i === 0 ? "right" : "left",
+        })) {
+          cloud.append(svg("circle", { cx: grain.x, cy: y + 5 + grain.y, r: grain.r, opacity: grain.opacity }));
+        }
+        group.append(titled(cloud, tip));
+      });
     }
 
     for (const mark of row.marks) {

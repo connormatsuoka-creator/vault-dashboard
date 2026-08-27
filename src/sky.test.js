@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting } from "./sky.js";
+import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting, dustCloud } from "./sky.js";
 
 const FIELD = { width: 1000, height: 600, count: 200 };
 
@@ -110,4 +110,55 @@ test("a moon is lit on the limb that faces the star", () => {
   assert.ok(right.cx < 50, "bright point should face the star");
   const left = bucketLighting(lightingBucket({ x: -100, y: 0 }, centre));
   assert.ok(left.cx > 50);
+});
+
+// ---------------------------------------------------------------------------
+// Dust — an imprecise span end
+// ---------------------------------------------------------------------------
+
+test("a dust cloud is the same cloud every render", () => {
+  // Same reason as the starfield: the timeline redraws on every filter change,
+  // and grains that reshuffle make the row crawl.
+  const spec = { x0: 10, x1: 90, height: 9, seed: 3 };
+  assert.deepEqual(dustCloud(spec), dustCloud(spec));
+});
+
+test("every grain lands inside the stretch it was given", () => {
+  const grains = dustCloud({ x0: 40, x1: 120, height: 9, seed: 5 });
+  assert.ok(grains.length > 0);
+  for (const g of grains) {
+    assert.ok(g.x >= 40 && g.x <= 120, `x ${g.x} outside 40..120`);
+    assert.ok(g.y >= 0 && g.y <= 9, `y ${g.y} outside the band`);
+  }
+});
+
+test("dust thickens toward the end that is certain", () => {
+  // Semantic, not decorative: nearer the stretch we know was running, the more
+  // likely the span was running too.
+  const half = (grains, x0, x1) => {
+    const mid = (x0 + x1) / 2;
+    return [grains.filter((g) => g.x < mid).length, grains.filter((g) => g.x >= mid).length];
+  };
+  const tail = dustCloud({ x0: 0, x1: 100, height: 9, seed: 11, certainSide: "left" });
+  const [tailLeft, tailRight] = half(tail, 0, 100);
+  assert.ok(tailLeft > tailRight, "a tail should be densest at its left, beside the core");
+
+  const head = dustCloud({ x0: 0, x1: 100, height: 9, seed: 11, certainSide: "right" });
+  const [headLeft, headRight] = half(head, 0, 100);
+  assert.ok(headRight > headLeft, "a head should be densest at its right, beside the core");
+});
+
+test("a wider stretch gets more grains, not bigger ones", () => {
+  const narrow = dustCloud({ x0: 0, x1: 20, height: 9, seed: 2 });
+  const wide = dustCloud({ x0: 0, x1: 200, height: 9, seed: 2 });
+  assert.ok(wide.length > narrow.length * 5, "density should follow width");
+  assert.ok(narrow.length >= 8, "even the narrowest stretch must read as dust, not as a speck");
+  const biggest = (g) => Math.max(...g.map((x) => x.r));
+  assert.ok(Math.abs(biggest(wide) - biggest(narrow)) < 1.2, "grain size should not scale with width");
+});
+
+test("a zero-width or zero-height stretch yields nothing rather than throwing", () => {
+  assert.deepEqual(dustCloud({ x0: 50, x1: 50, height: 9 }), []);
+  assert.deepEqual(dustCloud({ x0: 0, x1: 100, height: 0 }), []);
+  assert.deepEqual(dustCloud({ x0: 100, x1: 20, height: 9 }), []);
 });
