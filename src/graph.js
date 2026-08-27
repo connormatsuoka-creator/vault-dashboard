@@ -98,51 +98,93 @@ export function neighbours(graph, path) {
   return [...(graph.adjacency.get(path) ?? [])].sort();
 }
 
+/** Guaranteed arc distance between two adjacent moons, in px. */
+const MOON_GAP = 30;
+/** Clear space between a planet's limb and its own moons. */
+const PLANET_CLEAR = 16;
+
 /**
- * Give every node and domain a fixed position.
+ * Give every node and domain a fixed position: a solar system.
  *
- * Domains take angular sectors sized by how many connected files they hold, so
- * a big domain is visibly big. Files sit at even angles inside their own
- * sector. Computed once from the graph and never recomputed per view — that is
- * what guarantees nothing moves.
+ * Domains are PLANETS on one orbit around a centre; the files in a domain are
+ * MOONS on that planet's own orbit. Computed once from the graph and never
+ * recomputed per view — which is what guarantees nothing moves, and is the
+ * property the whole drill-down mechanic rests on.
  *
- * @param {number} gap  radians of blank between sectors, so groups read as groups
+ * Two rules keep a crowded domain from becoming a smear, and they compose:
+ *
+ *   1. A moon orbit is whatever radius GUARANTEES MOON_GAP between adjacent
+ *      moons. Eight files therefore get a wider orbit than two, and the spacing
+ *      between moons is identical on every planet rather than varying with how
+ *      full the domain happens to be.
+ *
+ *   2. Angular room around the centre is allocated by each planet's FOOTPRINT —
+ *      the radius rule 1 just produced — and not by its file count. So the
+ *      planet that needs the most room gets it, and no two moon systems can
+ *      overlap however lopsided the vault becomes.
+ *
+ * Rule 2 replaced an earlier "sector proportional to file count", which sized
+ * the planet but not the room its moons needed, so a dense domain still
+ * crowded. Proportionality is preserved in the thing that carries it — a
+ * planet's radius, and its orbit — rather than in the angle.
  */
-export function layout(graph, { cx = 0, cy = 0, rDomain = 96, rFile = 186, gap = 0.22, start = -Math.PI / 2 } = {}) {
+export function layout(graph, { cx = 0, cy = 0, rOrbit = 178, start = -Math.PI / 2 } = {}) {
   const nodes = new Map();
   const domains = new Map();
+  const centre = { x: cx, y: cy };
 
-  const total = graph.nodes.length;
-  if (total === 0) return { nodes, domains };
+  if (graph.nodes.length === 0) return { nodes, domains, centre };
 
-  // Whatever is not spent on gaps is shared out one slice per file.
-  const perFile = (Math.PI * 2 - graph.domains.length * gap) / total;
+  // 1. Size each planet, and derive the orbit its moons need.
+  const planets = graph.domains.map((name) => {
+    const mine = graph.nodes.filter((n) => n.domain === name);
+    const r = 8 + mine.length * 1.5;
+    return { name, mine, r, moonR: Math.max(r + PLANET_CLEAR, (mine.length * MOON_GAP) / (Math.PI * 2)) };
+  });
+
+  // 2. Share the circle out by footprint.
+  const footprint = planets.reduce((sum, d) => sum + d.moonR, 0);
 
   let angle = start;
-  for (const domain of graph.domains) {
-    const mine = graph.nodes.filter((n) => n.domain === domain);
+  for (const planet of planets) {
+    const sweep = (planet.moonR / footprint) * Math.PI * 2;
     const from = angle;
+    const to = from + sweep;
+    const mid = from + sweep / 2;
+    const x = cx + Math.cos(mid) * rOrbit;
+    const y = cy + Math.sin(mid) * rOrbit;
 
-    mine.forEach((n, i) => {
-      const a = from + (i + 0.5) * perFile;
-      nodes.set(n.path, { angle: a, x: cx + Math.cos(a) * rFile, y: cy + Math.sin(a) * rFile });
+    // Moons start on the far side of the planet from the star, so the first one
+    // is never hidden behind the planet's own label.
+    planet.mine.forEach((n, i) => {
+      const t = mid + Math.PI + ((i + 0.5) / planet.mine.length) * Math.PI * 2;
+      nodes.set(n.path, {
+        angle: t,
+        x: x + Math.cos(t) * planet.moonR,
+        y: y + Math.sin(t) * planet.moonR,
+        domain: planet.name,
+        // Where its planet is, so a renderer can orient a label outward from
+        // the moon system rather than from the distant centre.
+        px: x,
+        py: y,
+      });
     });
 
-    const to = from + mine.length * perFile;
-    const mid = (from + to) / 2;
-    domains.set(domain, {
+    domains.set(planet.name, {
       angle: mid,
       from,
       to,
-      count: mine.length,
-      x: cx + Math.cos(mid) * rDomain,
-      y: cy + Math.sin(mid) * rDomain,
+      count: planet.mine.length,
+      r: planet.r,
+      moonR: planet.moonR,
+      x,
+      y,
     });
 
-    angle = to + gap;
+    angle = to;
   }
 
-  return { nodes, domains, centre: { x: cx, y: cy } };
+  return { nodes, domains, centre };
 }
 
 /**

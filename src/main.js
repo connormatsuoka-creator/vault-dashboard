@@ -903,9 +903,13 @@ function renderGraph() {
     const dx = domain.x - current.centre.x;
     const dy = domain.y - current.centre.y;
     const away = Math.hypot(dx, dy) || 1;
+    // Clear the planet’s OWN moon ring. A fixed offset was right when every
+    // file sat on one shared outer ring; now each planet carries its own moons,
+    // and 26px puts the label on top of them.
+    const clear = (domain.moonR ?? 14) + 20;
     const name = svg("text", {
-      x: domain.x + (dx / away) * 26,
-      y: domain.y + (dy / away) * 26 + 4,
+      x: domain.x + (dx / away) * clear,
+      y: domain.y + (dy / away) * clear + 4,
       "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
       class: "gdom-name",
     });
@@ -941,12 +945,15 @@ function renderGraph() {
 
     // Push the label outward along the node's own radius, so it never sits on
     // top of the ring it belongs to.
-    const dx = node.x - current.centre.x;
-    const dy = node.y - current.centre.y;
+    // Outward from the moon’s OWN planet. Measured from the distant centre, a
+    // moon on the near half of its ring has its label pushed inward - straight
+    // through the planet it belongs to.
+    const dx = node.x - (node.px ?? current.centre.x);
+    const dy = node.y - (node.py ?? current.centre.y);
     const length = Math.hypot(dx, dy) || 1;
     const label = svg("text", {
-      x: node.x + (dx / length) * 15,
-      y: node.y + (dy / length) * 15 + 3.5,
+      x: node.x + (dx / length) * (radiusFor(node.degree) + 9),
+      y: node.y + (dy / length) * (radiusFor(node.degree) + 9) + 3.5,
       "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
       class: "glabel",
     });
@@ -980,17 +987,23 @@ function frameToContent(current) {
     return;
   }
 
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
+  // Each point reaches further than its own coordinate: a planet carries a moon
+  // ring and a label beyond that. Framing on the bare coordinates clipped the
+  // labels the moment they were pushed clear of the moons.
+  const reach = (p) => (p.moonR ?? 0) + 26;
+  const lefts = points.map((p) => p.x - reach(p));
+  const rights = points.map((p) => p.x + reach(p));
+  const tops = points.map((p) => p.y - reach(p));
+  const bottoms = points.map((p) => p.y + reach(p));
 
-  // Labels sit outside their marks and run horizontally, so x needs the room.
-  const padX = 96;
-  const padY = 44;
+  // Labels run horizontally, so x still needs more room than y.
+  const padX = 72;
+  const padY = 30;
 
-  const minX = Math.min(...xs) - padX;
-  const minY = Math.min(...ys) - padY;
-  const width = Math.max(...xs) + padX - minX;
-  const height = Math.max(...ys) + padY - minY;
+  const minX = Math.min(...lefts) - padX;
+  const minY = Math.min(...tops) - padY;
+  const width = Math.max(...rights) + padX - minX;
+  const height = Math.max(...bottoms) + padY - minY;
 
   els.graphSvg.setAttribute("viewBox", `${minX} ${minY} ${width} ${height}`);
 }

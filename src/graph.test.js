@@ -26,6 +26,24 @@ const VAULT = buildModel([
 
 const G = buildGraph(VAULT);
 
+/**
+ * Deliberately lopsided: eight files against two. The vault's real shape is
+ * 8/7/7/7/3/2, and a crowding bug hides completely in a fixture where every
+ * domain is the same size.
+ */
+const LOPSIDED = buildGraph(
+  buildModel([
+    ...Array.from({ length: 8 }, (_, i) => ({
+      path: `big/f${i}.md`,
+      text: fm(`big${i}`) + `\nlinks \`[[small/s0]]\`\n`,
+    })),
+    ...Array.from({ length: 2 }, (_, i) => ({
+      path: `small/s${i}.md`,
+      text: fm(`small${i}`) + `\nlinks \`[[big/f0]]\`\n`,
+    })),
+  ])
+);
+
 // ---------------------------------------------------------------------------
 // buildGraph
 // ---------------------------------------------------------------------------
@@ -69,20 +87,66 @@ test("every connected node gets a position, and no isolated one does", () => {
   for (const n of G.isolated) assert.equal(p.nodes.get(n.path), undefined);
 });
 
-test("sectors are proportional to file count and never overlap", () => {
-  const p = layout(G, { gap: 0.2 });
+test("sectors fill the circle and never overlap", () => {
+  const p = layout(G);
   const spans = [...p.domains.values()].map((d) => d.to - d.from);
-  const totalSpan = spans.reduce((a, b) => a + b, 0);
-  const expected = Math.PI * 2 - p.domains.size * 0.2;
-  assert.ok(Math.abs(totalSpan - expected) < 1e-9, "sectors plus gaps must fill the circle");
+  const total = spans.reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(total - Math.PI * 2) < 1e-9, "sectors must fill the circle exactly");
 
   const ordered = [...p.domains.values()].sort((a, b) => a.from - b.from);
   for (let i = 1; i < ordered.length; i++) {
-    assert.ok(ordered[i].from >= ordered[i - 1].to, "sectors overlap");
+    assert.ok(ordered[i].from >= ordered[i - 1].to - 1e-9, "sectors overlap");
   }
-  // self has 2 connected files, system has 1 — so its sector is twice as wide.
-  assert.ok(Math.abs(p.domains.get("self").to - p.domains.get("self").from -
-    2 * (p.domains.get("system").to - p.domains.get("system").from)) < 1e-9);
+});
+
+test("a bigger domain gets a bigger planet and a wider moon orbit", () => {
+  // Proportionality did not go away when angle stopped carrying it — it moved
+  // to the thing that can carry it without crowding.
+  const p = layout(LOPSIDED);
+  const big = p.domains.get("big");
+  const small = p.domains.get("small");
+  assert.ok(big.count > small.count, "fixture is not actually lopsided");
+  assert.ok(big.r > small.r, "the fuller domain must be the bigger planet");
+  assert.ok(big.moonR > small.moonR, "the fuller domain must have the wider orbit");
+});
+
+test("adjacent moons are never closer than the guaranteed gap", () => {
+  // The rule the layout exists to enforce: spacing is identical on every
+  // planet, however full it is. Eight files get a wider orbit, not a tighter
+  // ring.
+  const p = layout(LOPSIDED);
+  for (const [name, d] of p.domains) {
+    if (d.count < 2) continue;
+    const arc = (2 * Math.PI * d.moonR) / d.count;
+    assert.ok(arc >= 30 - 1e-9, `${name}: moons ${arc.toFixed(1)}px apart, under the 30px floor`);
+  }
+});
+
+test("no two moon systems overlap, however lopsided the vault", () => {
+  // This is what allocating angle by footprint buys. Allocating by file count
+  // instead put a small domain's moons through its neighbour's.
+  const p = layout(LOPSIDED);
+  const all = [...p.domains.values()];
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = all[i];
+      const b = all[j];
+      const apart = Math.hypot(a.x - b.x, a.y - b.y);
+      assert.ok(
+        apart > a.moonR + b.moonR,
+        `moon systems overlap: ${apart.toFixed(0)}px apart, footprints ${(a.moonR + b.moonR).toFixed(0)}px`
+      );
+    }
+  }
+});
+
+test("every moon orbits its own planet, not the centre", () => {
+  const p = layout(LOPSIDED);
+  for (const [path, n] of p.nodes) {
+    const d = p.domains.get(n.domain);
+    const fromPlanet = Math.hypot(n.x - d.x, n.y - d.y);
+    assert.ok(Math.abs(fromPlanet - d.moonR) < 1e-6, `${path} is not on its planet's orbit`);
+  }
 });
 
 test("an empty graph lays out without throwing", () => {
