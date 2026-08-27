@@ -1,41 +1,134 @@
 /* tokens.css
  *
- * ############################################################
- * #  PLACEHOLDER PALETTE — this is NOT the visual identity.  #
- * ############################################################
+ * The visual identity: DEEP FIELD.
  *
- * The visual identity for this project is a deliberate decision, still to be made.
- * Until it is, these values are intentionally quiet: neutral greys, one restrained
- * accent, no personality. They exist so the layout has something to consume, not
- * because anyone chose them.
+ * The vault as a solar system. Domains are planets on one orbit, each lit from
+ * a central star; files are moons on their own planet's orbit. The reasoning —
+ * why the metaphor is structural rather than decorative, and what a rebuild has
+ * to keep — is owned by the vault at projects/vault-dashboard/visual.md. This
+ * file is only the values.
  *
- * The point of putting them here is that swapping in a real identity later
- * means editing this file only. If a colour ever appears in app.css or in a
- * .js file, that promise is broken — so it must not.
+ * THE RULE THAT GOVERNS EVERY SCREEN
  *
- * Spacing and type scale are NOT placeholder. Those are structural, and
- * changing them means changing layout, so they are worth getting right now.
+ * Glow is a property of BODIES, never of CHROME. The star and the moons bloom
+ * because they emit light; the page ground carries a starfield. The moment a
+ * region's job is to be read it sits on a flat panel, and every label on a
+ * diagram gets its own dark plate. That is what lets the atmosphere survive
+ * contact with dense type, and it is the only reason this direction is legible.
+ *
+ * If a colour ever appears in app.css or in a .js file, the promise that a
+ * re-theme means editing one file is broken. So it must not.
+ *
+ * Spacing and type scale are structural, not decorative: changing them changes
+ * layout.
  */
 
+/* ---------------------------------------------------------------------------
+ * Typefaces
+ *
+ * Self-hosted, and self-hosted ONLY: the page's Content-Security-Policy sets
+ * font-src 'self', so a CDN is refused by the browser rather than merely
+ * discouraged. Latin subset — see assets/fonts/README.md for provenance and
+ * the licence position.
+ *
+ * The four interface marks that were once text glyphs — two arrows, two
+ * disclosure chevrons — are deliberately NOT characters. U+2190, U+2192,
+ * U+25B8 and U+25BE fall outside this subset, so as glyphs they would silently
+ * render in whatever face the OS reached for. They are inline SVG instead.
+ * ------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/ChakraPetch-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/ChakraPetch-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Chakra Petch";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../assets/fonts/ChakraPetch-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/JetBrainsMono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/JetBrainsMono-500.woff2") format("woff2");
+}
+
 :root {
-  /* --- Colour: PLACEHOLDER --------------------------------------------- */
-  --bg: #14161a;
-  --surface: #1c1f25;
-  --surface-raised: #23272f;
-  --border: #2e333c;
+  /* --- Ground and surfaces --------------------------------------------
+   * Four depths, and the order matters: --bg is the void the starfield sits
+   * on, --surface is a flat panel above it, --surface-raised is recessed
+   * within a panel. Nothing that carries text is transparent to the void. */
+  --bg: #07070d;
+  --surface: #12121f;
+  --surface-raised: #0b0b14;
+  --surface-high: #171728;
+  --border: #22223a;
+  --border-strong: #2b2b46;
 
-  --text: #e8eaed;
-  --text-muted: #9299a5;
-  --text-faint: #6b7280;
+  --text: #eceaf6;
+  --text-muted: #9c98be;
+  --text-faint: #645f85;
 
-  --accent: #6b8afd;
-  --accent-text: #ffffff;
+  /* Interactive. Dark ink on cyan, because cyan on dark cannot carry text. */
+  --accent: #5ad3e6;
+  --accent-text: #061318;
+  --accent-dim: rgba(90, 211, 230, 0.14);
 
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --bad: #f87171;
+  /* Semantic. Deliberately not the accent hue — a status must not read as a
+   * control. `ok` shares the accent's family but is used at low opacity, so a
+   * passing row recedes and a failing one does not. */
+  --ok: #5ad3e6;
+  --warn: #f0b478;
+  --bad: #ff7a92;
 
-  /* --- Spacing: structural, not placeholder ---------------------------- */
+  /* --- Celestial ------------------------------------------------------
+   * The only tokens that describe light rather than surface. Used by the
+   * orrery and the timeline, and by nothing that has to be read. */
+  --star: #ffd79a;
+  --star-core: #fff8ea;
+  --nebula: #2e2660;
+  --moon: #f2eeff;
+  --link-cross: #8f7bff;
+  --link-within: #5ad3e6;
+
+  /* Planets, assigned by domain in stable sort order rather than by name —
+   * the vault's domains are discovered, not fixed, so a palette that indexes
+   * survives a domain being added or renamed. Equal lightness and chroma,
+   * hue apart, so no planet outranks another. Cycles past six. */
+  --planet-1: #e8a877;
+  --planet-2: #dcc06a;
+  --planet-3: #86c08a;
+  --planet-4: #74b6cc;
+  --planet-5: #96a0dc;
+  --planet-6: #cf93c4;
+  --planet-1-dark: #4a2f22;
+  --planet-2-dark: #453820;
+  --planet-3-dark: #25401f;
+  --planet-4-dark: #1e3a45;
+  --planet-5-dark: #282c4e;
+  --planet-6-dark: #432744;
+
+  /* --- Spacing: structural ---------------------------------------------- */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -44,9 +137,15 @@
   --space-6: 2rem;
   --space-7: 3rem;
 
-  /* --- Type: family is placeholder, scale is structural ---------------- */
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  /* --- Type -------------------------------------------------------------
+   * Display carries the wordmark, panel headings and the big numbers. Mono
+   * carries every path, count, date and frontmatter key — it is the face this
+   * dashboard leans on hardest, which is why legibility at 10px decided it.
+   * Body stays on the system stack: free, and already the most legible thing
+   * at 12px. */
+  --font-display: "Chakra Petch", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", "Consolas", monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
@@ -55,30 +154,70 @@
   --text-xl: 1.75rem;
 
   /* --- Shape ------------------------------------------------------------ */
-  --radius: 8px;
-  --radius-sm: 4px;
+  --radius: 4px;
+  --radius-sm: 3px;
   --max-width: 56rem;
 }
 
-/* Light mode. Same token names, different values — nothing in app.css changes.
- * Mirrors the pattern Focus Timer already uses, which is a proven approach even
- * though the specific colours here are not the ones we're keeping. */
+/* ---------------------------------------------------------------------------
+ * Light mode — UNRESOLVED, and deliberately not invented.
+ *
+ * Deep field is a photograph of space. There is no light-mode version of that,
+ * and naively inverting it would produce exactly the washed-out imitation the
+ * direction exists to avoid. No light variant was ever designed: all nineteen
+ * approved artboards are dark.
+ *
+ * So this block is a LEGIBLE FALLBACK, not a second identity. A reader whose
+ * system prefers light gets a usable dashboard with correct contrast; they do
+ * not get the starfield, the glow, or the planets rendered against paper,
+ * because those would be worse than not having them.
+ *
+ * The open question for Connor: commit to dark only and drop this block, or
+ * commission a light variant as its own piece of design work. Until then this
+ * keeps light-preference users from a broken page, which is the one thing that
+ * must not happen while the question is open.
+ * ------------------------------------------------------------------------- */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f6f7f9;
+    --bg: #eceef2;
     --surface: #ffffff;
-    --surface-raised: #f0f2f5;
-    --border: #dfe3e8;
+    --surface-raised: #f3f5f8;
+    --surface-high: #e7eaf0;
+    --border: #d5dae2;
+    --border-strong: #c2c9d4;
 
-    --text: #1a1d21;
-    --text-muted: #5b6472;
-    --text-faint: #8b93a1;
+    --text: #14161d;
+    --text-muted: #545a6b;
+    --text-faint: #7c8394;
 
-    --accent: #3b5bdb;
+    --accent: #1d6f7d;
     --accent-text: #ffffff;
+    --accent-dim: rgba(29, 111, 125, 0.12);
 
-    --ok: #16a34a;
-    --warn: #b45309;
-    --bad: #dc2626;
+    --ok: #1d6f7d;
+    --warn: #9a6212;
+    --bad: #b03b50;
+
+    /* Celestial tokens still resolve, so nothing renders as `unset` — but the
+     * renderer is expected to withhold the atmosphere in this mode. */
+    --star: #9a6212;
+    --star-core: #c98a2a;
+    --nebula: #d9dcea;
+    --moon: #3a3f50;
+    --link-cross: #5b4fbe;
+    --link-within: #1d6f7d;
+
+    --planet-1: #b56a33;
+    --planet-2: #94781f;
+    --planet-3: #3f7a48;
+    --planet-4: #256f88;
+    --planet-5: #555da8;
+    --planet-6: #94437f;
+    --planet-1-dark: #e8cdb6;
+    --planet-2-dark: #e2dab4;
+    --planet-3-dark: #c2dcc5;
+    --planet-4-dark: #bcd8e2;
+    --planet-5-dark: #cbcfe8;
+    --planet-6-dark: #e6c9de;
   }
 }
