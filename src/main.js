@@ -18,6 +18,7 @@ import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
 import { buildChronology, timelineScene } from "./chronology.js";
 import { icon, setIconLabel } from "./icons.js";
+import { starfield, planetLighting, planetToken } from "./sky.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -850,6 +851,19 @@ function svg(tag, attrs = {}) {
   return node;
 }
 
+/**
+ * The world the camera moves across.
+ *
+ * Generated once, across a rect far larger than any view frames, so panning
+ * between views reveals different stars rather than sliding the same ones
+ * about. Deterministic, so drilling into a domain does not make the sky
+ * shimmer.
+ */
+const SKY = starfield({ x: -260, y: -260, width: 1240, height: 1040, count: 340, seed: 41 });
+
+/** Three tints, mapped to tokens here so no colour appears in JavaScript. */
+const STAR_TINT = ["var(--star-core)", "var(--moon)", "var(--star)"];
+
 /** Node size reads degree at a glance. sqrt so a hub does not swamp the view. */
 const radiusFor = (degree) => 4 + Math.sqrt(degree) * 2;
 
@@ -862,6 +876,7 @@ function renderGraph() {
   if (!state.graph) return;
 
   const current = scene(state.graph, state.positions, state.view);
+  const plates = [];
   state.view = { ...state.view, mode: current.mode }; // scene may have fallen back
 
   els.graphCaption.textContent = current.caption;
@@ -869,7 +884,91 @@ function renderGraph() {
     ? `${current.isolated} files have no links in either direction — index files list their contents as plain names, not wiki-links, so they never enter the graph.`
     : "";
 
-  const layers = { edges: [], marks: [], labels: [] };
+  // Every gradient this view needs. Rebuilt per render because the lighting
+  // depends on where each planet sits relative to the star, and ids are scoped
+  // by mode so two views never share a stale definition.
+  const defs = svg("defs");
+  const gradient = (id, stops, focal) => {
+    const g = svg("radialGradient", { id, ...(focal ? { cx: `${focal.cx}%`, cy: `${focal.cy}%`, r: "78%" } : {}) });
+    for (const [offset, color, opacity] of stops) {
+      g.append(svg("stop", { offset, "stop-color": color, ...(opacity === undefined ? {} : { "stop-opacity": opacity }) }));
+    }
+    defs.append(g);
+    return `url(#${id})`;
+  };
+
+  const corona = gradient("sky-corona", [
+    ["0%", "var(--star-core)", 0.9],
+    ["18%", "var(--star)", 0.36],
+    ["55%", "var(--star)", 0.1],
+    ["100%", "var(--bg)", 0],
+  ]);
+  const nebula = gradient("sky-nebula", [
+    ["0%", "var(--nebula)", 0.38],
+    ["100%", "var(--bg)", 0],
+  ]);
+  const halo = gradient("sky-halo", [
+    ["0%", "var(--moon)", 0.45],
+    ["100%", "var(--moon)", 0],
+  ]);
+
+  const planetFill = new Map();
+  state.graph.domains.forEach((name, i) => {
+    const at = state.positions.domains.get(name);
+    if (!at) return;
+    const token = planetToken(i);
+    const { cx, cy } = planetLighting(at, current.centre);
+    planetFill.set(
+      name,
+      gradient(
+        `sky-planet-${current.mode}-${i}`,
+        [
+          ["0%", `var(--planet-${token})`],
+          ["58%", `var(--planet-${token})`, 0.6],
+          ["100%", `var(--planet-${token}-dark)`],
+        ],
+        { cx, cy }
+      )
+    );
+  });
+
+  const layers = { sky: [defs], edges: [], marks: [], labels: [] };
+
+  // The void, then the deep colour in it, then the stars. Nebulae sit far out
+  // so they never end up behind a label.
+  layers.sky.push(svg("rect", { x: -400, y: -400, width: 1600, height: 1400, class: "gvoid" }));
+  for (const [nx, ny, rx, ry] of [
+    [current.centre.x - 300, current.centre.y - 230, 300, 190],
+    [current.centre.x + 320, current.centre.y + 240, 320, 200],
+  ]) {
+    layers.sky.push(svg("ellipse", { cx: nx, cy: ny, rx, ry, fill: nebula }));
+  }
+  for (const s of SKY) {
+    layers.sky.push(
+      svg("circle", { cx: s.x, cy: s.y, r: s.r, fill: STAR_TINT[s.tint], opacity: s.opacity, class: "gstar" })
+    );
+  }
+
+  // Orbits: the one the planets ride, and each planet's own moon ring.
+  layers.sky.push(
+    svg("circle", { cx: current.centre.x, cy: current.centre.y, r: 178, class: "gorbit" })
+  );
+  for (const domain of current.domains) {
+    if (domain.moonR === undefined) continue;
+    layers.sky.push(
+      svg("circle", {
+        cx: domain.x,
+        cy: domain.y,
+        r: domain.moonR,
+        class: `gorbit gorbit--moon gorbit--${domain.state} gp-${planetToken(state.graph.domains.indexOf(domain.name))}`,
+      })
+    );
+  }
+
+  // The star. The only thing in the diagram that emits rather than reflects.
+  layers.marks.push(svg("circle", { cx: current.centre.x, cy: current.centre.y, r: 120, fill: corona }));
+  layers.marks.push(svg("circle", { cx: current.centre.x, cy: current.centre.y, r: 13, class: "gstar-core" }));
+  layers.marks.push(svg("circle", { cx: current.centre.x, cy: current.centre.y, r: 19, class: "gstar-ring" }));
 
   for (const chord of current.domainChords) {
     layers.edges.push(
@@ -891,8 +990,15 @@ function renderGraph() {
   }
 
   for (const domain of current.domains) {
-    const group = svg("g", { class: `gdom gdom--${domain.state} ghit`, tabindex: "0", role: "button" });
-    group.append(svg("circle", { cx: domain.x, cy: domain.y, r: domain.state === "focus" ? 17 : 14 }));
+    const token = planetToken(state.graph.domains.indexOf(domain.name));
+    const group = svg("g", { class: `gdom gdom--${domain.state} gp-${token} ghit`, tabindex: "0", role: "button" });
+    const pr = (domain.r ?? 14) + (domain.state === "focus" ? 3 : 0);
+    group.append(
+      svg("circle", { cx: domain.x, cy: domain.y, r: pr, fill: planetFill.get(domain.name) ?? "none" })
+    );
+    group.append(
+      svg("circle", { cx: domain.x, cy: domain.y, r: pr, class: "gplanet-rim" })
+    );
 
     const count = svg("text", { x: domain.x, y: domain.y + 4, "text-anchor": "middle", class: "gdom-count" });
     count.textContent = String(domain.count);
@@ -914,7 +1020,11 @@ function renderGraph() {
       class: "gdom-name",
     });
     name.textContent = domain.name;
-    group.append(name);
+    // Glow is a property of bodies, never of chrome — so a label never sits on
+    // a gradient. The plate is sized from the text once it is measured.
+    const plate = svg("rect", { class: "gplate", rx: 2 });
+    group.append(plate, name);
+    plates.push([plate, name]);
 
     const open = () => setGraphView({ mode: "domain", domain: domain.name });
     group.addEventListener("click", open);
@@ -926,6 +1036,10 @@ function renderGraph() {
 
   for (const node of current.nodes) {
     const group = svg("g", { class: `gnode gnode--${node.state} ghit`, tabindex: "0", role: "button" });
+    // A moon reflects: a soft halo, then a small bright body. The halo is
+    // drawn per node rather than as a filter so it costs nothing to animate
+    // later and cannot blur the label beside it.
+    group.append(svg("circle", { cx: node.x, cy: node.y, r: radiusFor(node.degree) + 5, fill: halo, class: "gmoon-halo" }));
     group.append(svg("circle", { cx: node.x, cy: node.y, r: radiusFor(node.degree) }));
 
     const title = svg("title");
@@ -961,8 +1075,17 @@ function renderGraph() {
     layers.labels.push(label);
   }
 
-  els.graphSvg.replaceChildren(...layers.edges, ...layers.marks, ...layers.labels);
+  els.graphSvg.replaceChildren(...layers.sky, ...layers.edges, ...layers.marks, ...layers.labels);
   frameToContent(current);
+
+  // Plates can only be sized once the text is in the document and measurable.
+  for (const [plate, text] of plates) {
+    const box = text.getBBox();
+    plate.setAttribute("x", box.x - 5);
+    plate.setAttribute("y", box.y - 2);
+    plate.setAttribute("width", box.width + 10);
+    plate.setAttribute("height", box.height + 4);
+  }
 
   // "Read this file" only exists when there is a file to read. The graph finds
   // things; browse is where you read one.

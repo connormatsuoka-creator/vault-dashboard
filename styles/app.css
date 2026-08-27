@@ -734,13 +734,12 @@ code {
 }
 
 .gdom circle {
-  fill: var(--surface);
-  stroke: var(--accent);
   stroke-width: 1.5;
 }
 
+/* A focused planet brightens its rim rather than repainting its body - the
+ * lighting is the identity of the planet and must survive being selected. */
 .gdom--focus circle {
-  fill: var(--accent);
   stroke: var(--accent);
 }
 
@@ -1130,3 +1129,128 @@ code {
   color: var(--text);
   border-color: var(--accent);
 }
+
+/* --- The sky ------------------------------------------------------------- */
+
+/* Glow is a property of bodies, never of chrome. Everything below either emits
+ * light or reflects it; nothing that carries text appears here. */
+
+.gvoid {
+  fill: var(--bg);
+}
+
+.gstar {
+  pointer-events: none;
+}
+
+/* The star at the centre — the only thing in the diagram that emits. */
+.gstar-core {
+  fill: var(--star-core);
+}
+
+.gstar-ring {
+  fill: none;
+  stroke: var(--star);
+  stroke-width: 0.8;
+  opacity: 0.45;
+}
+
+/* Orbits are structure, drawn faintly enough to be read as paths rather than
+ * as rings that mean something on their own. */
+.gorbit {
+  fill: none;
+  stroke: var(--link-cross);
+  stroke-width: 0.7;
+  opacity: 0.13;
+}
+
+.gorbit--moon {
+  opacity: 0.17;
+  stroke-width: 0.6;
+}
+
+.gorbit--muted {
+  opacity: 0.05;
+}
+
+.gplanet-rim {
+  fill: none;
+  stroke-width: 0.8;
+  opacity: 0.35;
+}
+
+.gdom--focus .gplanet-rim {
+  stroke-width: 1.6;
+  opacity: 0.9;
+}
+
+.gmoon-halo {
+  pointer-events: none;
+  opacity: 0.42;
+}
+
+/* A moon reflects the star: a small bright body, not a filled surface. */
+.gnode circle:not(.gmoon-halo) {
+  fill: var(--moon);
+  stroke: none;
+}
+
+.gnode--focus circle:not(.gmoon-halo) {
+  fill: var(--accent);
+}
+
+.gnode--muted {
+  opacity: 0.18;
+}
+
+/* Every label on the diagram gets its own dark plate, so none is ever read
+ * against a gradient. This is the rule that makes the atmosphere survive. */
+.gplate {
+  fill: var(--bg);
+  opacity: 0.84;
+}
+
+/* Cross-domain links are the thing worth seeing; within-domain ones recede. */
+.gedge {
+  stroke: var(--link-within);
+}
+
+.gedge--emphasis {
+  stroke: var(--link-cross);
+}
+
+.gchord {
+  stroke: var(--link-cross);
+}
+
+/* Planet colour, one class per palette slot. Assigned by domain sort order in
+ * sky.js, so a vault that gains or renames a domain still gets a stable set.
+ *
+ * These are classes rather than inline styles because the page’s policy is
+ * style-src 'self' with no unsafe-inline: a style attribute is parsed to zero
+ * declarations, silently. Colour belongs in this file anyway. */
+
+.gp-1 .gplanet-rim { stroke: var(--planet-1); }
+.gp-1 .gdom-count { fill: var(--planet-1-dark); }
+.gorbit--moon.gp-1 { stroke: var(--planet-1); }
+
+.gp-2 .gplanet-rim { stroke: var(--planet-2); }
+.gp-2 .gdom-count { fill: var(--planet-2-dark); }
+.gorbit--moon.gp-2 { stroke: var(--planet-2); }
+
+.gp-3 .gplanet-rim { stroke: var(--planet-3); }
+.gp-3 .gdom-count { fill: var(--planet-3-dark); }
+.gorbit--moon.gp-3 { stroke: var(--planet-3); }
+
+.gp-4 .gplanet-rim { stroke: var(--planet-4); }
+.gp-4 .gdom-count { fill: var(--planet-4-dark); }
+.gorbit--moon.gp-4 { stroke: var(--planet-4); }
+
+.gp-5 .gplanet-rim { stroke: var(--planet-5); }
+.gp-5 .gdom-count { fill: var(--planet-5-dark); }
+.gorbit--moon.gp-5 { stroke: var(--planet-5); }
+
+.gp-6 .gplanet-rim { stroke: var(--planet-6); }
+.gp-6 .gdom-count { fill: var(--planet-6-dark); }
+.gorbit--moon.gp-6 { stroke: var(--planet-6); }
+
