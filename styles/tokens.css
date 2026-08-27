@@ -99,7 +99,7 @@
    * passing row recedes and a failing one does not. */
   --ok: #5ad3e6;
   --warn: #f0b478;
-  --bad: #ff7a92;
+  --bad: #d4626d;
 
   /* --- Celestial ------------------------------------------------------
    * The only tokens that describe light rather than surface. Used by the

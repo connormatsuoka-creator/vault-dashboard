@@ -17,7 +17,7 @@ import { searchVault, MAX_RESULTS } from "./search.js";
 import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
 import { buildChronology, timelineScene } from "./chronology.js";
-import { icon, setIconLabel } from "./icons.js";
+import { icon, setIconLabel, statusDot } from "./icons.js";
 import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting, dustCloud } from "./sky.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
@@ -225,7 +225,7 @@ function buildCheckRow(check) {
 
   const mark = document.createElement("span");
   mark.className = "check-mark";
-  mark.textContent = check.status === "pass" ? "OK" : check.status === "warn" ? "!" : "X";
+  mark.append(statusDot(check.status));
 
   const label = document.createElement("span");
   label.className = "check-label";
@@ -301,7 +301,7 @@ function buildCheckRow(check) {
 function renderThresholds(t) {
   els.thresholds.textContent =
     `thresholds — router ${t.caps.router} · index ${t.caps.index} · leaf ${t.caps.leaf} · ` +
-    `inbox ${t.inboxMax} items · stale ${t.staleDays}d · warn at ${Math.round(t.warnAtFraction * 100)}%` +
+    `inbox ${t.inboxMax} items · stale ${t.staleDays}d · warn at ${Math.round(t.warnAtFraction * 100)}% · critical at ${Math.round(t.criticalAtFraction * 100)}%` +
     `${(t.capExempt ?? []).length ? ` · exempt: ${t.capExempt.join(", ")}` : ""}` +
     `  (source: ${t.source})`;
 }

@@ -11,7 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildModel } from "./model.js";
-import { loadThresholds, THRESHOLDS } from "./health.js";
+import { loadThresholds, runHealthChecks, THRESHOLDS } from "./health.js";
 
 const CONFIG = "system/config.md";
 
@@ -36,6 +36,7 @@ const FULL = [
   "warn-at-fraction: 0.75",
   "warn-at-inbox: 20",
   "warn-at-stale-days: 45",
+  "critical-at-fraction: 0.9",
 ].join("\n");
 
 test("no config file falls back entirely, and says so", () => {
@@ -56,6 +57,7 @@ test("a complete config wins on every value", () => {
   assert.equal(t.warnAtFraction, 0.75);
   assert.equal(t.warnAtInbox, 20);
   assert.equal(t.warnAtStaleDays, 45);
+  assert.equal(t.criticalAtFraction, 0.9);
   assert.equal(t.source, `vault ${CONFIG}`);
 });
 
@@ -109,4 +111,68 @@ test("an explicit fallback is honoured over the built-in one", () => {
 test("a config file with no frontmatter is treated as absent", () => {
   const model = buildModel([{ path: CONFIG, text: "# Config\n\nno frontmatter here\n" }]);
   assert.match(loadThresholds(model).source, /built-in fallback/);
+});
+
+// ---------------------------------------------------------------------------
+// The critical tier
+//
+// 85% of a cap and 96% of a cap are different problems: one means keep an eye
+// on it, the other means find the cause now, while the fix is still small. One
+// status meaning both is a status you learn to ignore.
+// ---------------------------------------------------------------------------
+
+/** A file of exactly `lines` lines, at a leaf path so the leaf cap applies. */
+const sized = (name, lines) => ({
+  path: `d/${name}.md`,
+  text: `---\nupdated: 2026-08-21\nstatus: cold\nowns: [${name}]\n---\n` + "x\n".repeat(Math.max(0, lines - 6)),
+});
+
+const capsCheck = (files, thresholds) =>
+  runHealthChecks(buildModel(files), thresholds).find((c) => c.id === "caps");
+
+test("a file past the critical fraction outranks one that is merely near", () => {
+  const t = { ...THRESHOLDS, caps: { router: 80, index: 40, leaf: 100 }, capExempt: [] };
+  // 87 lines is 87% — a warning. 96 is 96% — the tier above it.
+  assert.equal(capsCheck([sized("near", 87)], t).status, "warn");
+  assert.equal(capsCheck([sized("close", 96)], t).status, "critical");
+  // And the worse of the two decides the row, so one at 96% is not hidden
+  // behind four at 87%.
+  const mixed = capsCheck([sized("a", 87), sized("b", 88), sized("c", 96)], t);
+  assert.equal(mixed.status, "critical");
+});
+
+test("over the cap still outranks critical", () => {
+  const t = { ...THRESHOLDS, caps: { router: 80, index: 40, leaf: 100 }, capExempt: [] };
+  assert.equal(capsCheck([sized("close", 96), sized("over", 140)], t).status, "fail");
+});
+
+test("each item carries its own severity, not just the row", () => {
+  const t = { ...THRESHOLDS, caps: { router: 80, index: 40, leaf: 100 }, capExempt: [] };
+  const c = capsCheck([sized("a", 87), sized("c", 96), sized("over", 140)], t);
+  assert.deepEqual(
+    c.items.map((i) => i.severity).sort(),
+    ["critical", "fail", "warn"],
+    "the expanded list should be able to mark which is which"
+  );
+});
+
+test("the critical fraction comes from the vault like every other threshold", () => {
+  const t = loadThresholds(withConfig(FULL));
+  assert.equal(t.criticalAtFraction, 0.9);
+  // And a nonsense value falls back rather than being trusted.
+  const bad = loadThresholds(withConfig("updated: 2026-08-21\ncritical-at-fraction: 7"));
+  assert.equal(bad.criticalAtFraction, THRESHOLDS.criticalAtFraction);
+  assert.match(bad.source, /critical-at-fraction/);
+});
+
+test("the inbox and staleness use the same tier", () => {
+  const t = { ...THRESHOLDS, inboxMax: 20, warnAtInbox: 12, criticalAtFraction: 0.95 };
+  const inbox = (n) =>
+    runHealthChecks(
+      buildModel([{ path: "system/inbox.md", text: "---\nupdated: 2026-08-21\nstatus: hot\nowns: [i]\n---\n" + "- item\n".repeat(n) }]),
+      t
+    ).find((c) => c.id === "inbox");
+  assert.equal(inbox(13).status, "warn", "13 of 20 is a warning");
+  assert.equal(inbox(19).status, "critical", "19 of 20 is the tier above");
+  assert.equal(inbox(25).status, "fail", "past the cap is still a failure");
 });

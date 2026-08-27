@@ -45,6 +45,10 @@ export const THRESHOLDS = {
   warnAtFraction: 0.85,
   warnAtInbox: 12,
   warnAtStaleDays: 21,
+  // A second tier above the warning. 85% means keep an eye on it; 95% means
+  // find the cause now, while the fix is still small. Two tiers because one
+  // warning that means both is a warning you learn to ignore.
+  criticalAtFraction: 0.95,
 };
 
 /** Where the vault keeps the real numbers. */
@@ -101,6 +105,7 @@ export function loadThresholds(model, fallback = THRESHOLDS) {
     warnAtFraction: num("warn-at-fraction", fallback.warnAtFraction, isFraction),
     warnAtInbox: num("warn-at-inbox", fallback.warnAtInbox),
     warnAtStaleDays: num("warn-at-stale-days", fallback.warnAtStaleDays),
+    criticalAtFraction: num("critical-at-fraction", fallback.criticalAtFraction, isFraction),
   };
 
   // Naming the source is the whole safety mechanism for a duplicated number: a
@@ -219,35 +224,47 @@ function capFor(path, thresholds) {
 
 function checkSizeCaps(model, thresholds) {
   const over = [];
+  const critical = [];
   const approaching = [];
 
   for (const file of model.files) {
     const { cap, kind } = capFor(file.path, thresholds);
     const fraction = file.lineCount / cap;
+    const detail = `${file.lineCount}/${cap} lines — ${Math.round(fraction * 100)}%`;
 
     if (file.lineCount > cap) {
-      over.push({ text: `${file.path} is over the ${kind} cap`, detail: `${file.lineCount}/${cap} lines` });
+      over.push({ text: `${file.path} is over the ${kind} cap`, detail: `${file.lineCount}/${cap} lines`, severity: "fail" });
+    } else if (fraction >= thresholds.criticalAtFraction) {
+      critical.push({ text: `${file.path} is close to the ${kind} cap`, detail, severity: "critical" });
     } else if (fraction >= thresholds.warnAtFraction) {
-      approaching.push({
-        text: `${file.path} is near the ${kind} cap`,
-        detail: `${file.lineCount}/${cap} lines — ${Math.round(fraction * 100)}%`,
-      });
+      approaching.push({ text: `${file.path} is near the ${kind} cap`, detail, severity: "warn" });
     }
   }
 
+  const items = [...over, ...critical, ...approaching];
+  const pct = (f) => Math.round(f * 100);
+
   if (over.length) {
-    return check("caps", "Size caps", "fail", `${over.length} file${over.length === 1 ? "" : "s"} over cap`, [
-      ...over,
-      ...approaching,
-    ]);
+    return check("caps", "Size caps", "fail", `${over.length} file${over.length === 1 ? "" : "s"} over cap`, items);
+  }
+  // The worse of the two tiers decides the row, so a single file at 96% is not
+  // hidden behind four at 86%.
+  if (critical.length) {
+    return check(
+      "caps",
+      "Size caps",
+      "critical",
+      `${critical.length} file${critical.length === 1 ? "" : "s"} at ${pct(thresholds.criticalAtFraction)}%+ of cap`,
+      items
+    );
   }
   if (approaching.length) {
     return check(
       "caps",
       "Size caps",
       "warn",
-      `${approaching.length} file${approaching.length === 1 ? "" : "s"} at ${Math.round(thresholds.warnAtFraction * 100)}%+ of cap`,
-      approaching
+      `${approaching.length} file${approaching.length === 1 ? "" : "s"} at ${pct(thresholds.warnAtFraction)}%+ of cap`,
+      items
     );
   }
   return check("caps", "Size caps", "pass", `all ${model.files.length} files within cap`);
@@ -269,8 +286,10 @@ function checkStaleness(model, thresholds, today) {
 
   aged.sort((a, b) => b.days - a.days);
 
+  const criticalDays = thresholds.staleDays * thresholds.criticalAtFraction;
   const stale = aged.filter((a) => a.days > thresholds.staleDays);
-  const ageing = aged.filter((a) => a.days > thresholds.warnAtStaleDays && a.days <= thresholds.staleDays);
+  const nearlyStale = aged.filter((a) => a.days >= criticalDays && a.days <= thresholds.staleDays);
+  const ageing = aged.filter((a) => a.days > thresholds.warnAtStaleDays && a.days < criticalDays);
 
   // Even when passing, report the oldest — a check that says only "OK" teaches
   // nothing about how close it came.
@@ -284,6 +303,15 @@ function checkStaleness(model, thresholds, today) {
 
   if (stale.length) {
     return check("staleness", "Staleness", "fail", `${stale.length} hot file${stale.length === 1 ? "" : "s"} over ${thresholds.staleDays} days old`, toItems([...stale, ...ageing]));
+  }
+  if (nearlyStale.length) {
+    return check(
+      "staleness",
+      "Staleness",
+      "critical",
+      `${nearlyStale.length} hot file${nearlyStale.length === 1 ? "" : "s"} within days of going stale`,
+      toItems([...nearlyStale, ...ageing])
+    );
   }
   if (ageing.length) {
     return check("staleness", "Staleness", "warn", `${ageing.length} hot file${ageing.length === 1 ? "" : "s"} over ${thresholds.warnAtStaleDays} days old`, toItems(ageing));
@@ -308,6 +336,9 @@ function checkInbox(model, thresholds) {
 
   if (n > thresholds.inboxMax) {
     return check("inbox", "Inbox", "fail", `${n} items — over the cap of ${thresholds.inboxMax}, reconcile before other work`, preview);
+  }
+  if (n >= thresholds.inboxMax * thresholds.criticalAtFraction) {
+    return check("inbox", "Inbox", "critical", `${n} items, at the cap of ${thresholds.inboxMax}`, preview);
   }
   if (n >= thresholds.warnAtInbox) {
     return check("inbox", "Inbox", "warn", `${n} items, approaching the cap of ${thresholds.inboxMax}`, preview);

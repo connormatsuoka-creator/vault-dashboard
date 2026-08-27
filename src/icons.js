@@ -88,3 +88,53 @@ export function setIconLabel(el, name, label, side = "before") {
   text.textContent = label;
   el.replaceChildren(...(side === "before" ? [icon(name), text] : [text, icon(name)]));
 }
+
+/**
+ * The mark on a health row.
+ *
+ * Four states, not three. `critical` is drawn as a circle split vertically —
+ * warning on the left, failing on the right — because 85% of a cap and 96% of
+ * a cap are different problems: one means keep an eye on it, the other means
+ * find the cause now, while the fix is still small. One mark meaning both is a
+ * mark you learn to ignore.
+ *
+ * Colour comes from CSS, and a <title> names the state, because a status
+ * carried by colour alone is not a status everyone can read.
+ *
+ * @param {'pass'|'warn'|'critical'|'fail'} status
+ */
+export function statusDot(status, size = 11) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
+  svg.setAttribute("class", `dot dot--${status}`);
+  svg.setAttribute("role", "img");
+
+  const title = document.createElementNS(SVG_NS, "title");
+  title.textContent = {
+    pass: "passing",
+    warn: "warning",
+    critical: "close to failing",
+    fail: "needs attention now",
+  }[status] ?? status;
+  svg.append(title);
+
+  if (status === "critical") {
+    // Two half-discs meeting on the vertical. Same arc, opposite sweep.
+    for (const [sweep, half] of [[0, "warn"], [1, "fail"]]) {
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", `M6 1 A5 5 0 0 ${sweep} 6 11 Z`);
+      path.setAttribute("class", `dot-half dot-half--${half}`);
+      svg.append(path);
+    }
+    return svg;
+  }
+
+  const circle = document.createElementNS(SVG_NS, "circle");
+  circle.setAttribute("cx", "6");
+  circle.setAttribute("cy", "6");
+  circle.setAttribute("r", "5");
+  svg.append(circle);
+  return svg;
+}
