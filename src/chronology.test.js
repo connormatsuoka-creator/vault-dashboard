@@ -184,6 +184,95 @@ test("a degenerate axis does not divide by zero", () => {
   assert.equal(same.degenerate, true);
 });
 
+// ---------------------------------------------------------------------------
+// Reading the axis backwards — what a brush needs
+// ---------------------------------------------------------------------------
+
+test("every anchor survives a round trip through project and back", () => {
+  const anchors = [
+    Date.UTC(2017, 0, 1),
+    Date.UTC(2024, 5, 1),
+    Date.UTC(2026, 7, 14),
+    Date.UTC(2026, 7, 15),
+    Date.UTC(2026, 7, 24),
+    Date.UTC(2026, 7, 28),
+  ];
+  const scale = buildScale(anchors);
+  for (const ms of anchors) {
+    const back = scale.unproject(scale.project(ms));
+    assert.ok(Math.abs(back - ms) < 1000, `${new Date(ms).toISOString()} came back as ${new Date(back).toISOString()}`);
+  }
+});
+
+test("unprojection is monotonic and clamps outside the axis", () => {
+  const base = Date.UTC(2026, 7, 14);
+  const scale = buildScale([base, base + DAY, base + 2 * DAY, base + 400 * DAY]);
+  let previous = -Infinity;
+  for (let i = 0; i <= 20; i++) {
+    const ms = scale.unproject(i / 20);
+    assert.ok(ms >= previous, "unprojection went backwards");
+    previous = ms;
+  }
+  assert.equal(scale.unproject(-3), scale.from, "before the axis clamps to its start");
+  assert.equal(scale.unproject(9), scale.to, "after the axis clamps to its end");
+});
+
+test("a handle dropped inside a break snaps to its nearer edge", () => {
+  const scale = buildScale([Date.UTC(2017, 0, 1), Date.UTC(2024, 5, 1), Date.UTC(2024, 5, 2), Date.UTC(2024, 5, 3)]);
+  const band = scale.breaks[0];
+  const width = band.x1 - band.x0;
+
+  // A day inside the void, not on its edge — the edges are the events that
+  // bracket the break, and a closed window boundary landing on one selects it.
+  const near = scale.resolve(band.x0 + width * 0.1);
+  assert.equal(near.snapped, true);
+  assert.equal(near.ms, band.from + DAY);
+  assert.ok(near.unit > band.x0 && near.unit < band.x1, "snapped outside the band it snapped within");
+
+  const far = scale.resolve(band.x0 + width * 0.9);
+  assert.equal(far.snapped, true);
+  assert.equal(far.ms, band.to - DAY);
+  assert.ok(far.unit > near.unit, "the two edges resolved to the same side");
+
+  // Outside a break the pointer is taken literally, or the brush would be
+  // unable to select a single day in the region that has all the events.
+  const dense = scale.resolve(0.97);
+  assert.equal(dense.snapped, false);
+  assert.equal(dense.unit, 0.97);
+});
+
+test("snapping inside a break cannot change which files a window selects", () => {
+  // The entire justification for snapping. A break exists BECAUSE nothing is
+  // recorded inside it, so every position within one selects the same files and
+  // moving the handle to the edge is a normalisation rather than a rounding
+  // error. If this ever fails, snapping has started lying.
+  const model = modelOf([
+    ["self/learning.md", file("occurred: 2017-01-01")],
+    ["ventures/a.md", file("occurred: 2024-06-01")],
+    ["ventures/b.md", file("occurred: 2024-06-03")],
+  ]);
+  const { scale, tracks } = buildChronology(model, TODAY);
+  const band = scale.breaks[0];
+  const width = band.x1 - band.x0;
+  const from = (unit) => tracks.filter((t) => t.to >= scale.unproject(unit)).map((t) => t.path).join(" ");
+
+  const inside = [];
+  for (let i = 1; i < 10; i++) inside.push(from(band.x0 + width * (i / 10)));
+  assert.equal(new Set(inside).size, 1, `positions inside a break disagreed: ${[...new Set(inside)].join(" | ")}`);
+  assert.equal(from(scale.resolve(band.x0 + width * 0.4).unit), inside[0]);
+
+  // And the probe genuinely has resolution — otherwise the assertion above
+  // would pass for a predicate that selects everything everywhere.
+  assert.notEqual(from(Math.max(0, band.x0 - 1e-6)), inside[0], "the window predicate is not sensitive");
+});
+
+test("a degenerate axis resolves every position to its one moment", () => {
+  const only = Date.UTC(2026, 7, 14);
+  const scale = buildScale([only]);
+  assert.equal(scale.unproject(0.2), only);
+  assert.deepEqual(scale.resolve(0.9), { unit: 0.5, ms: only, snapped: true });
+});
+
 test("durations are rounded the way a person would say them", () => {
   assert.equal(humanDuration(5 * DAY), "5 days");
   assert.equal(humanDuration(1 * DAY), "1 day");

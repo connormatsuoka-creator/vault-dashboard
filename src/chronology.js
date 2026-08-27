@@ -254,7 +254,20 @@ export function buildScale(anchors) {
   if (points.length === 0) return null;
   if (points.length === 1) {
     const only = points[0];
-    return { from: only, to: only, degenerate: true, segments: [], breaks: [], project: () => 0.5 };
+    return {
+      from: only,
+      to: only,
+      degenerate: true,
+      segments: [],
+      breaks: [],
+      project: () => 0.5,
+      unproject: () => only,
+      // One moment exists, so every position on the axis resolves to it. Saying
+      // snapped: true is not a technicality — a brush here cannot be dragged to
+      // mean anything else, and the readout should say so rather than invent a
+      // range from a single point.
+      resolve: () => ({ unit: 0.5, ms: only, snapped: true }),
+    };
   }
 
   const gaps = [];
@@ -304,6 +317,62 @@ export function buildScale(anchors) {
     return 1;
   };
 
+  /**
+   * A position on the axis back to a moment — the exact inverse of project.
+   *
+   * A brush is dragged in pixels, so the window it produces only exists once
+   * the axis can be read backwards. Same segment walk, same clamping: every
+   * anchor survives a round trip to within a second, which is the property the
+   * test asserts.
+   */
+  const unproject = (unit) => {
+    if (!Number.isFinite(unit)) return null;
+    if (unit <= 0) return points[0];
+    if (unit >= 1) return points[points.length - 1];
+    for (const segment of segments) {
+      if (unit >= segment.x0 && unit <= segment.x1) {
+        const width = segment.x1 - segment.x0;
+        const within = width === 0 ? 0 : (unit - segment.x0) / width;
+        return segment.from + within * segment.length;
+      }
+    }
+    return points[points.length - 1];
+  };
+
+  /**
+   * Where a dragged handle actually lands.
+   *
+   * Inside a break, the axis is violently non-linear — fifty pixels can carry
+   * eleven months — so a handle dropped there names a date the pixel cannot
+   * really resolve. It snaps to the nearer edge of the break.
+   *
+   * That is a normalisation, not an approximation, and the difference matters:
+   * a break exists BECAUSE no event falls inside it, so every position within
+   * one selects the identical set of files. Snapping cannot change the answer.
+   * All it changes is the date the readout claims, from an arbitrary one to a
+   * date a reader can act on. Nearer edge by screen distance rather than by
+   * elapsed time, so the handle keeps following the pointer.
+   *
+   * The one-day inset is not a fudge. A break's EDGES are the two events that
+   * bracket it — band.from is where the last one ended and band.to is where the
+   * next one begins — so an edge is the single position in the whole band that
+   * DOES change the selection, since a window boundary is closed at both ends.
+   * Landing a day inside the void keeps the promise the snapping is justified
+   * by. A break clears MIN_BREAK_DAYS by construction, so a day is always
+   * strictly inside one.
+   *
+   * @returns {{unit:number, ms:number, snapped:boolean}}
+   */
+  const resolve = (unit) => {
+    const clamped = Math.min(1, Math.max(0, Number.isFinite(unit) ? unit : 0));
+    const band = segments.find((s) => s.isBreak && clamped > s.x0 && clamped < s.x1);
+    if (!band) return { unit: clamped, ms: unproject(clamped), snapped: false };
+    const ms = clamped - band.x0 <= band.x1 - clamped ? band.from + DAY : band.to - DAY;
+    // Reprojected rather than returned as the edge, so the handle sits where
+    // the date says it does and the readout cannot contradict the drawing.
+    return { unit: project(ms), ms, snapped: true };
+  };
+
   const breaks = segments
     .filter((s) => s.isBreak)
     .map((s) => ({
@@ -315,7 +384,16 @@ export function buildScale(anchors) {
       label: humanDuration(s.length),
     }));
 
-  return { from: points[0], to: points[points.length - 1], degenerate: false, segments, breaks, project };
+  return {
+    from: points[0],
+    to: points[points.length - 1],
+    degenerate: false,
+    segments,
+    breaks,
+    project,
+    unproject,
+    resolve,
+  };
 }
 
 // ---------------------------------------------------------------------------
