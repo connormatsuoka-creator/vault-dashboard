@@ -154,70 +154,13 @@
   --text-xl: 1.75rem;
 
   /* --- Shape ------------------------------------------------------------ */
+  /* Deep field is a single-theme design, decided 2026-08-24. This is what
+   * makes it a choice rather than an omission: the UA paints scrollbars, form
+   * controls and its own canvas ground from this, so without it a
+   * light-preference reader gets a white <select> on a black page. */
+  color-scheme: dark;
+
   --radius: 4px;
   --radius-sm: 3px;
   --max-width: 56rem;
-}
-
-/* ---------------------------------------------------------------------------
- * Light mode — UNRESOLVED, and deliberately not invented.
- *
- * Deep field is a photograph of space. There is no light-mode version of that,
- * and naively inverting it would produce exactly the washed-out imitation the
- * direction exists to avoid. No light variant was ever designed: all nineteen
- * approved artboards are dark.
- *
- * So this block is a LEGIBLE FALLBACK, not a second identity. A reader whose
- * system prefers light gets a usable dashboard with correct contrast; they do
- * not get the starfield, the glow, or the planets rendered against paper,
- * because those would be worse than not having them.
- *
- * The open question for Connor: commit to dark only and drop this block, or
- * commission a light variant as its own piece of design work. Until then this
- * keeps light-preference users from a broken page, which is the one thing that
- * must not happen while the question is open.
- * ------------------------------------------------------------------------- */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #eceef2;
-    --surface: #ffffff;
-    --surface-raised: #f3f5f8;
-    --surface-high: #e7eaf0;
-    --border: #d5dae2;
-    --border-strong: #c2c9d4;
-
-    --text: #14161d;
-    --text-muted: #545a6b;
-    --text-faint: #7c8394;
-
-    --accent: #1d6f7d;
-    --accent-text: #ffffff;
-    --accent-dim: rgba(29, 111, 125, 0.12);
-
-    --ok: #1d6f7d;
-    --warn: #9a6212;
-    --bad: #b03b50;
-
-    /* Celestial tokens still resolve, so nothing renders as `unset` — but the
-     * renderer is expected to withhold the atmosphere in this mode. */
-    --star: #9a6212;
-    --star-core: #c98a2a;
-    --nebula: #d9dcea;
-    --moon: #3a3f50;
-    --link-cross: #5b4fbe;
-    --link-within: #1d6f7d;
-
-    --planet-1: #b56a33;
-    --planet-2: #94781f;
-    --planet-3: #3f7a48;
-    --planet-4: #256f88;
-    --planet-5: #555da8;
-    --planet-6: #94437f;
-    --planet-1-dark: #e8cdb6;
-    --planet-2-dark: #e2dab4;
-    --planet-3-dark: #c2dcc5;
-    --planet-4-dark: #bcd8e2;
-    --planet-5-dark: #cbcfe8;
-    --planet-6-dark: #e6c9de;
-  }
 }

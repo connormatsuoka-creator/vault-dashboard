@@ -17,6 +17,7 @@ import { searchVault, MAX_RESULTS } from "./search.js";
 import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
 import { buildChronology, timelineScene } from "./chronology.js";
+import { icon, setIconLabel } from "./icons.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -278,13 +279,13 @@ function buildCheckRow(check) {
   const openByDefault = check.status !== "pass";
   list.hidden = !openByDefault;
   row.setAttribute("aria-expanded", String(openByDefault));
-  toggle.textContent = openByDefault ? "▾" : "▸";
+  toggle.replaceChildren(icon(openByDefault ? "chevron-down" : "chevron-right", { size: 12 }));
 
   row.addEventListener("click", () => {
     const nowOpen = row.getAttribute("aria-expanded") !== "true";
     row.setAttribute("aria-expanded", String(nowOpen));
     list.hidden = !nowOpen;
-    toggle.textContent = nowOpen ? "▾" : "▸";
+    toggle.replaceChildren(icon(nowOpen ? "chevron-down" : "chevron-right", { size: 12 }));
   });
 
   li.append(list);
@@ -960,7 +961,7 @@ function renderGraph() {
   // things; browse is where you read one.
   const focused = current.mode === "file" ? state.view.path : null;
   els.graphOpen.hidden = !focused;
-  if (focused) els.graphOpen.textContent = `Read ${focused} →`;
+  if (focused) setIconLabel(els.graphOpen, "arrow-right", `Read ${focused}`, "after");
 }
 
 /**
@@ -1236,6 +1237,12 @@ function renderTimelineDomains(chronology) {
   });
   els.timelineDomain.replaceChildren(all, ...options);
 }
+
+// Two controls carry a mark in their markup-free label. Setting it here rather
+// than in index.html keeps every icon in one place, and keeps index.html from
+// having to hand-write SVG it cannot recolour.
+setIconLabel(els.fileBack, "arrow-left", "Back");
+setIconLabel(els.graphHome, "arrow-left", "Domains");
 
 els.openVault.addEventListener("click", openVault);
 els.retry.addEventListener("click", openVault);
