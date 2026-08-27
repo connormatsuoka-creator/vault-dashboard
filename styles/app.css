@@ -1184,19 +1184,17 @@ code {
   opacity: 0.9;
 }
 
-.gmoon-halo {
-  pointer-events: none;
-  opacity: 0.42;
+/* A moon carries its own lighting gradient, so no rule here may set its fill.
+ * A hairline rim keeps the shadowed limb from dissolving into the void. */
+.gmoon {
+  stroke: var(--moon-dark);
+  stroke-width: 0.5;
 }
 
-/* A moon reflects the star: a small bright body, not a filled surface. */
-.gnode circle:not(.gmoon-halo) {
-  fill: var(--moon);
-  stroke: none;
-}
-
-.gnode--focus circle:not(.gmoon-halo) {
-  fill: var(--accent);
+/* Selected: a ring rather than a repaint, so the moon stays a lit body. */
+.gnode--focus .gmoon {
+  stroke: var(--accent);
+  stroke-width: 1.6;
 }
 
 .gnode--muted {

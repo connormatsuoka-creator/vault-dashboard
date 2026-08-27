@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { starfield, planetLighting, planetToken } from "./sky.js";
+import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting } from "./sky.js";
 
 const FIELD = { width: 1000, height: 600, count: 200 };
 
@@ -81,4 +81,33 @@ test("planet tokens index the palette and wrap rather than running out", () => {
   // A vault that grows a seventh domain must not get an undefined colour.
   assert.equal(planetToken(6), 1);
   assert.equal(planetToken(13), 2);
+});
+
+test("moons in the same direction from the star share a gradient", () => {
+  // Thirty moons must not need thirty gradient definitions. Bucketing is what
+  // makes reflected light cheap enough to give every one of them.
+  const centre = { x: 0, y: 0 };
+  const a = lightingBucket({ x: 100, y: 0 }, centre);
+  const b = lightingBucket({ x: 200, y: 1 }, centre);
+  assert.equal(a, b, "near-identical directions should share a bucket");
+  assert.notEqual(a, lightingBucket({ x: 0, y: 100 }, centre));
+});
+
+test("a bucket always lands in range, whatever the angle", () => {
+  const centre = { x: 50, y: 50 };
+  for (let deg = 0; deg < 360; deg += 7) {
+    const rad = (deg * Math.PI) / 180;
+    const at = { x: 50 + Math.cos(rad) * 90, y: 50 + Math.sin(rad) * 90 };
+    const b = lightingBucket(at, centre);
+    assert.ok(Number.isInteger(b) && b >= 0 && b < 24, `bucket ${b} out of range at ${deg} degrees`);
+  }
+});
+
+test("a moon is lit on the limb that faces the star", () => {
+  const centre = { x: 0, y: 0 };
+  // A moon to the RIGHT of the star is lit on its left limb.
+  const right = bucketLighting(lightingBucket({ x: 100, y: 0 }, centre));
+  assert.ok(right.cx < 50, "bright point should face the star");
+  const left = bucketLighting(lightingBucket({ x: -100, y: 0 }, centre));
+  assert.ok(left.cx > 50);
 });

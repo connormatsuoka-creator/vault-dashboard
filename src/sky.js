@@ -89,3 +89,33 @@ export function planetLighting(planet, centre, offset = 34) {
 export function planetToken(index, palette = 6) {
   return (index % palette) + 1;
 }
+
+/**
+ * Which way a body is lit, bucketed.
+ *
+ * Every moon is lit by the same central star, so its terminator depends only on
+ * the angle from that star. Bucketing means thirty moons share a handful of
+ * gradient definitions instead of needing one each, and at these sizes the
+ * rounding is invisible.
+ *
+ * @returns {number} bucket index, 0..count-1
+ */
+export function lightingBucket(body, centre, count = 24) {
+  const angle = Math.atan2(centre.y - body.y, centre.x - body.x);
+  const turns = (angle + Math.PI * 2) / (Math.PI * 2);
+  return Math.round(turns * count) % count;
+}
+
+/**
+ * The gradient focal point for a bucket, in percent of the bounding box.
+ *
+ * Same convention as planetLighting: offset toward the light, so the bright
+ * limb faces the star and the far side falls into its own shadow.
+ */
+export function bucketLighting(bucket, count = 24, offset = 32) {
+  const angle = (bucket / count) * Math.PI * 2;
+  return {
+    cx: Number((50 + Math.cos(angle) * offset).toFixed(1)),
+    cy: Number((50 + Math.sin(angle) * offset).toFixed(1)),
+  };
+}

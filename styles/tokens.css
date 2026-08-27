@@ -107,7 +107,14 @@
   --star: #ffd79a;
   --star-core: #fff8ea;
   --nebula: #2e2660;
-  --moon: #f2eeff;
+  /* A moon REFLECTS. It was a flat white disc, which gave it the one property
+   * that belongs to the star alone and left thirty of them competing with it.
+   * Three stops so a 6px circle still reads as a sphere: a soft lit limb, a
+   * mid body, and a terminator that falls away to nearly the void. Grey and
+   * desaturated on purpose - the warm star should be the only warm thing. */
+  --moon-lit: #cfcbd8;
+  --moon: #9a96ab;
+  --moon-dark: #35323f;
   --link-cross: #8f7bff;
   --link-within: #5ad3e6;
 

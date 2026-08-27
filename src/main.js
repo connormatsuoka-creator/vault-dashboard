@@ -18,7 +18,7 @@ import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
 import { buildChronology, timelineScene } from "./chronology.js";
 import { icon, setIconLabel } from "./icons.js";
-import { starfield, planetLighting, planetToken } from "./sky.js";
+import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting } from "./sky.js";
 
 /** Items shown when a check is expanded. Beyond this it says "and N more" —
  *  the point of the panel is a fixed-size default view, and a 500-row list is
@@ -907,10 +907,29 @@ function renderGraph() {
     ["0%", "var(--nebula)", 0.38],
     ["100%", "var(--bg)", 0],
   ]);
-  const halo = gradient("sky-halo", [
-    ["0%", "var(--moon)", 0.45],
-    ["100%", "var(--moon)", 0],
-  ]);
+  // Every moon is lit by the same star, so its terminator depends only on the
+  // direction to it. Bucketing the direction means thirty moons share a handful
+  // of gradients rather than needing one each. Built lazily: a view that draws
+  // no moons defines none.
+  const moonFill = new Map();
+  const moonGradient = (bucket) => {
+    if (!moonFill.has(bucket)) {
+      const { cx, cy } = bucketLighting(bucket);
+      moonFill.set(
+        bucket,
+        gradient(
+          `sky-moon-${current.mode}-${bucket}`,
+          [
+            ["0%", "var(--moon-lit)"],
+            ["45%", "var(--moon)"],
+            ["100%", "var(--moon-dark)"],
+          ],
+          { cx, cy }
+        )
+      );
+    }
+    return moonFill.get(bucket);
+  };
 
   const planetFill = new Map();
   state.graph.domains.forEach((name, i) => {
@@ -1036,11 +1055,19 @@ function renderGraph() {
 
   for (const node of current.nodes) {
     const group = svg("g", { class: `gnode gnode--${node.state} ghit`, tabindex: "0", role: "button" });
-    // A moon reflects: a soft halo, then a small bright body. The halo is
-    // drawn per node rather than as a filter so it costs nothing to animate
-    // later and cannot blur the label beside it.
-    group.append(svg("circle", { cx: node.x, cy: node.y, r: radiusFor(node.degree) + 5, fill: halo, class: "gmoon-halo" }));
-    group.append(svg("circle", { cx: node.x, cy: node.y, r: radiusFor(node.degree) }));
+    // A moon REFLECTS. It gets the same treatment as a planet - lit limb toward
+    // the star, far side in shadow - and no bloom of its own, because emission
+    // is the star’s alone. Thirty white discs with halos read as thirty little
+    // suns and left the real one competing with them.
+    group.append(
+      svg("circle", {
+        cx: node.x,
+        cy: node.y,
+        r: radiusFor(node.degree),
+        fill: moonGradient(lightingBucket(node, current.centre)),
+        class: "gmoon",
+      })
+    );
 
     const title = svg("title");
     title.textContent = `${node.path} — ${node.degree} link${node.degree === 1 ? "" : "s"}`;
