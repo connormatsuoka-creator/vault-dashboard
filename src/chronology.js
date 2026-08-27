@@ -587,6 +587,20 @@ export function buildChronology(model, today = new Date()) {
   };
 }
 
+/**
+ * The outer bounds of every dated file, keyed by path.
+ *
+ * This is the join between "when" and "where". The graph needs to know which
+ * files were live during a window, and handing it plain intervals rather than a
+ * chronology keeps graph.js ignorant of frontmatter, precision and the date
+ * grammar — it never learns that a date has a shape. A path absent from this
+ * map is undated, which is a fact the brush treats as its own case rather than
+ * as a missing value.
+ */
+export function trackSpans(chronology) {
+  return new Map(chronology.tracks.map((t) => [t.path, { from: t.from, to: t.to }]));
+}
+
 // ---------------------------------------------------------------------------
 // The scene — positions and states, no shapes
 // ---------------------------------------------------------------------------

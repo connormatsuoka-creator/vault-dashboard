@@ -255,3 +255,118 @@ test("every edge carries both endpoints and the centre it curves through", () =>
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// The brush — a date window laid across the modes
+//
+// Dates never reach this module. It is handed plain intervals, and a path that
+// is absent from them is undated, which is its own case rather than a gap.
+// ---------------------------------------------------------------------------
+
+const d = (iso) => Date.parse(iso + "T00:00:00Z");
+
+/** self/a ran through mid-2024, self/b for three weeks of 2026. system/x is undated. */
+const SPANS = new Map([
+  ["self/a.md", { from: d("2024-06-01"), to: d("2024-08-01") }],
+  ["self/b.md", { from: d("2026-08-01"), to: d("2026-08-20") }],
+]);
+const WIN_2024 = { from: d("2024-07-01"), to: d("2024-07-15") };
+const WIN_2026 = { from: d("2026-08-05"), to: d("2026-08-10") };
+const MODES = [
+  { mode: "domains" },
+  { mode: "domain", domain: "self" },
+  { mode: "file", path: "self/a.md" },
+  { mode: "full" },
+];
+const at = (s) => [...s.nodes, ...s.domains].map((p) => `${p.path ?? p.name}:${p.x},${p.y}`).join("|");
+const node = (s, path) => s.nodes.find((n) => n.path === path);
+const dom = (s, name) => s.domains.find((x) => x.name === name);
+
+test("a window moves nothing — the invariant the whole mechanic rests on", () => {
+  for (const view of MODES) {
+    const plain = scene(G, P, view);
+    const brushed = scene(G, P, { ...view, window: WIN_2024 }, SPANS);
+    assert.equal(at(brushed), at(plain), `${view.mode} moved under a brush`);
+  }
+});
+
+test("the window composes with the mode instead of replacing it", () => {
+  for (const view of MODES) {
+    const plain = scene(G, P, view);
+    const brushed = scene(G, P, { ...view, window: WIN_2024 }, SPANS);
+    assert.deepEqual(brushed.nodes.map((n) => n.state), plain.nodes.map((n) => n.state), view.mode);
+    assert.deepEqual(brushed.domains.map((x) => x.state), plain.domains.map((x) => x.state), view.mode);
+  }
+  // And the two fields genuinely disagree, which is why they are two fields:
+  // self/b is drawn plainly by its mode and sits outside the window at once.
+  const b = node(scene(G, P, { mode: "domain", domain: "self", window: WIN_2024 }, SPANS), "self/b.md");
+  assert.equal(b.state, "plain");
+  assert.equal(b.inWindow, false);
+});
+
+test("an undated file is never dimmed by a window", () => {
+  // 15 of the vault's 36 files carry no event date. Dimming them would assert
+  // they were absent during the window, which the data does not support.
+  const s = scene(G, P, { mode: "full", window: WIN_2024 }, SPANS);
+  assert.equal(node(s, "system/x.md").inWindow, null);
+  // null is a real third state, not an unset one — a dated file outside is false.
+  assert.equal(node(s, "self/a.md").inWindow, true);
+  assert.equal(node(s, "self/b.md").inWindow, false);
+});
+
+test("a window selects by overlap, not containment", () => {
+  // self/a runs June to August and the window is a fortnight inside it, holding
+  // neither end. Containment would drop exactly the long-running things a
+  // window is most useful for finding.
+  assert.equal(node(scene(G, P, { mode: "full", window: WIN_2024 }, SPANS), "self/a.md").inWindow, true);
+  // Touching at a single instant counts: the boundary is closed at both ends.
+  const touch = { from: d("2024-08-01"), to: d("2024-09-01") };
+  assert.equal(node(scene(G, P, { mode: "full", window: touch }, SPANS), "self/a.md").inWindow, true);
+  const clear = { from: d("2024-08-02"), to: d("2024-09-01") };
+  assert.equal(node(scene(G, P, { mode: "full", window: clear }, SPANS), "self/a.md").inWindow, false);
+});
+
+test("a domain is judged by every file it owns, not by the nodes drawn", () => {
+  // The domains view draws no nodes at all and is where the window says the
+  // most — which parts of the vault were alive at the same time. So a planet
+  // has to know things this scene never drew.
+  const s = scene(G, P, { mode: "domains", window: WIN_2026 }, SPANS);
+  assert.equal(s.nodes.length, 0);
+  assert.equal(dom(s, "self").inWindow, true);
+  // system holds one file, undated — null, not false. Same rule as a file, one
+  // level up: no date is not the same as not then.
+  assert.equal(dom(s, "system").inWindow, null);
+
+  const dated = new Map([...SPANS, ["system/x.md", { from: d("2020-01-01"), to: d("2020-02-01") }]]);
+  assert.equal(dom(scene(G, P, { mode: "domains", window: WIN_2026 }, dated), "system").inWindow, false);
+});
+
+test("an edge dims only when both of its ends are out", () => {
+  // a is inside the window and b is not. Dimming the link between them would
+  // leave a lit node looking unconnected, which is a false claim about the graph.
+  const s = scene(G, P, { mode: "full", window: WIN_2024 }, SPANS);
+  assert.equal(s.edges.every((e) => e.inWindow === true), true);
+
+  const both = new Map([
+    ["self/a.md", { from: d("2026-01-01"), to: d("2026-01-02") }],
+    ["self/b.md", { from: d("2026-01-01"), to: d("2026-01-02") }],
+  ]);
+  const out = scene(G, P, { mode: "full", window: WIN_2024 }, both);
+  const ab = out.edges.find((e) => [e.a, e.b].includes("self/b.md"));
+  assert.equal(ab.inWindow, false, "both ends outside should dim");
+  // a -- x survives, because x is undated and undated is never out.
+  assert.equal(out.edges.find((e) => [e.a, e.b].includes("system/x.md")).inWindow, true);
+});
+
+test("with no window brushed, nothing is judged", () => {
+  const s = scene(G, P, { mode: "full" });
+  assert.equal(s.window, null);
+  assert.equal([...s.nodes, ...s.edges, ...s.domains].every((p) => p.inWindow === null), true);
+  // A window without spans cannot invent membership out of nothing.
+  assert.equal(scene(G, P, { mode: "full", window: WIN_2024 }).window, null);
+});
+
+test("the caption counts the window without pretending undated files are out", () => {
+  const s = scene(G, P, { mode: "full", window: WIN_2024 }, SPANS);
+  assert.match(s.caption, /window holds 1\/2 dated, 1 undated stay lit/);
+});

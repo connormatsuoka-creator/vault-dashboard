@@ -198,9 +198,24 @@ export function layout(graph, { cx = 0, cy = 0, rOrbit = 178, start = -Math.PI /
  *   file     one file and everything linked to it, wherever that lives
  *   full     all of it
  *
- * @param {{mode: 'domains'|'domain'|'file'|'full', domain?: string, path?: string}} view
+ * A date window, when one is brushed, is applied on top as a SECOND and
+ * independent field. It is not a fifth mode and not another value in `state`,
+ * because the two answer different questions: `state` says what the mode asked
+ * for, `inWindow` says whether the thing was happening then. A file can be
+ * muted by its mode and inside the window at once, and collapsing that into one
+ * field would force a precedence rule between two things that do not conflict.
+ * Keeping them apart is what lets the brush compose with all four modes instead
+ * of replacing them.
+ *
+ * @param {{mode: 'domains'|'domain'|'file'|'full', domain?: string, path?: string,
+ *          window?: {from: number, to: number}}} view
+ * @param {Map<string, {from: number, to: number}>|null} spans - from trackSpans
  */
-export function scene(graph, positions, view) {
+export function scene(graph, positions, view, spans = null) {
+  return applyWindow(buildScene(graph, positions, view), graph, view?.window, spans);
+}
+
+function buildScene(graph, positions, view) {
   const mode = view?.mode ?? "domains";
   const at = (path) => positions.nodes.get(path);
   const centre = positions.centre ?? { x: 0, y: 0 };
@@ -246,7 +261,7 @@ export function scene(graph, positions, view) {
 
   if (mode === "file") {
     const focus = graph.byPath.get(view.path);
-    if (!focus) return scene(graph, positions, { mode: "domains" });
+    if (!focus) return buildScene(graph, positions, { mode: "domains" });
 
     const linked = neighbours(graph, view.path);
     const shown = new Set([view.path, ...linked]);
@@ -275,5 +290,79 @@ export function scene(graph, positions, view) {
     edges: graph.edges.map((e) =>
       edge(e.a, e.b, graph.byPath.get(e.a).domain !== graph.byPath.get(e.b).domain ? "emphasis" : "plain")
     ),
+  };
+}
+
+/**
+ * Stamp a date window across a built scene.
+ *
+ * Three states, and the third is the point:
+ *
+ *   true   dated, and live at some moment inside the window
+ *   false  dated, and not
+ *   null   UNDATED, and therefore never dimmed
+ *
+ * 15 of the vault's 36 files carry no event date. Dimming them for a window
+ * would assert they were ABSENT during it, which the data does not support —
+ * the same error as promoting `updated:` to an event date. Absence of a date is
+ * not absence from a window, so they stay lit and stay honest.
+ *
+ * Membership is OVERLAP, not containment. Silvia AI ran 2026-06 to 2026-08;
+ * asking what was happening in August has to include it. Containment would hide
+ * precisely the long-running things a window is most useful for finding.
+ *
+ * Domains are judged from every file they own rather than from the nodes this
+ * mode happens to draw, because the domains view draws no nodes at all and is
+ * the view where the window says the most: which parts of the vault were alive
+ * at once. A domain holding no dated files is null, not false — the same rule
+ * as a file, one level up.
+ */
+function applyWindow(built, graph, window, spans) {
+  if (!window || !spans) {
+    return {
+      ...built,
+      window: null,
+      nodes: built.nodes.map((n) => ({ ...n, inWindow: null })),
+      edges: built.edges.map((e) => ({ ...e, inWindow: null })),
+      domains: built.domains.map((d) => ({ ...d, inWindow: null })),
+    };
+  }
+
+  const overlaps = (span) => span.from <= window.to && span.to >= window.from;
+  const forPath = (path) => {
+    const span = spans.get(path);
+    return span ? overlaps(span) : null;
+  };
+
+  const forDomain = (name) => {
+    const dated = graph.nodes.filter((n) => n.domain === name).map((n) => spans.get(n.path)).filter(Boolean);
+    return dated.length === 0 ? null : dated.some(overlaps);
+  };
+
+  const nodes = built.nodes.map((n) => ({ ...n, inWindow: forPath(n.path) }));
+
+  // An edge dims only when BOTH ends are out. A link from a file inside the
+  // window to one outside is the most informative thing the brush surfaces —
+  // and dimming every edge touching an excluded file would leave a lit node
+  // looking unconnected, which is a false claim about the graph.
+  const edges = built.edges.map((e) => ({
+    ...e,
+    inWindow: forPath(e.a) !== false || forPath(e.b) !== false,
+  }));
+
+  const judged = graph.nodes.map((n) => forPath(n.path));
+  const inside = judged.filter((v) => v === true).length;
+  const dated = judged.filter((v) => v !== null).length;
+  const undated = judged.length - dated;
+
+  return {
+    ...built,
+    window,
+    nodes,
+    edges,
+    domains: built.domains.map((d) => ({ ...d, inWindow: forDomain(d.name) })),
+    caption:
+      `${built.caption} · window holds ${inside}/${dated} dated` +
+      (undated ? `, ${undated} undated stay lit` : ""),
   };
 }

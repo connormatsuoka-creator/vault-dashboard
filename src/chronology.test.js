@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 
 import { buildModel } from "./model.js";
 import {
+  trackSpans,
   parsePart,
   parseOccurred,
   isOccurred,
@@ -537,4 +538,20 @@ test("the scene projects every part of a bar into 0..1", () => {
       assert.ok(part.x1 >= part.x0, "part runs backwards");
     }
   }
+});
+
+test("trackSpans hands the graph intervals and nothing else", () => {
+  // The join between when and where. It must carry no frontmatter, no
+  // precision and no notion of a date's shape — the graph never learns any of
+  // that, and an undated file is simply absent rather than present with a null.
+  const model = modelOf([
+    ["ventures/dated.md", file("occurred: 2024-06/2024-08")],
+    ["system/undated.md", file("updated: 2026-08-24")],
+  ]);
+  const chronology = buildChronology(model, TODAY);
+  const spans = trackSpans(chronology);
+
+  assert.equal(spans.size, 1);
+  assert.equal(spans.has("system/undated.md"), false, "an undated file must be absent, not null");
+  assert.deepEqual(Object.keys(spans.get("ventures/dated.md")).sort(), ["from", "to"]);
 });
