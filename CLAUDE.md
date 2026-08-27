@@ -37,17 +37,31 @@ needed to see a change immediately after pushing.
 | `src/search.js` | Ranking a query against the model. Pure — no DOM |
 | `src/graph.js` | The connections **mechanic**: what is visible, where, how emphasised. Emits a scene; draws nothing |
 | `src/markdown.js` | Parsing markdown into a block tree. Builds no DOM |
+| `src/chronology.js` | The date grammar, and turning the vault into a timeline. Emits plain data |
+| `src/sky.js` | Deterministic celestial geometry: the starfield, how a body is lit, dust |
+| `src/icons.js` | The drawn interface marks. Nothing in the UI may be a text glyph |
 | `src/main.js` | Wiring and DOM rendering |
 | `styles/tokens.css` | Every colour, space, and size. **The only file a restyle should touch** |
 | `styles/app.css` | Layout. Contains no literal colours, and must not |
+| `assets/fonts/` | The two self-hosted typefaces and their licences. See its README |
 
 ## Rules this repo keeps
 
 - **Read-only.** `showDirectoryPicker({ mode: "read" })`. The dashboard is structurally
   incapable of writing to the vault; do not change this to `readwrite` for convenience.
-- **No network.** The CSP is `default-src 'none'`. That is what makes public hosting safe
-  for a tool that reads private notes — the page cannot send data anywhere.
+- **No network.** The CSP is `default-src 'none'`, so `connect-src` inherits it and fetch,
+  XHR and WebSockets are all refused. That is what makes public hosting safe for a tool
+  that reads private notes — the page cannot send data anywhere.
+  `font-src 'self'` is the one addition, permitting a typeface from this origin and
+  nothing else; it opens no channel that `img-src 'self'` did not already have.
 - **No dependencies.** Adding one puts third-party code between the vault and the disk.
+- **No inline styles. They do not work here, and they fail silently.** The CSP is
+  `style-src 'self'` with no `'unsafe-inline'`, so a `style` ATTRIBUTE is parsed to zero
+  declarations. `getAttribute` returns the string you set, devtools shows correct-looking
+  markup, and the computed value is whatever the stylesheet said — there is no error
+  anywhere. Colour by class; set geometry through the CSSOM (`el.style.width = …`), which
+  is not blocked. This cost an afternoon once: every planet in the orrery came out the
+  wrong colour with markup that looked right.
 - **No colours outside `tokens.css`.** A literal colour anywhere else breaks the promise
   that the visual identity can be swapped by editing one file.
 - **The graph mechanic is not the graph visual.** Drill-down, layout and view state live in
@@ -56,15 +70,18 @@ needed to see a change immediately after pushing.
 - **The dashboard stores nothing.** No persisted folder handle, no IndexedDB, no
   localStorage. Re-picking the vault each session is the cost of that, and it is the
   intended trade — the same kind of structural promise as read-only and no-network.
+- **Anything drawn must be deterministic.** `renderGraph` and `renderTimeline` run again on
+  every view change, so geometry from `Math.random` reshuffles each time — the starfield
+  shimmers, the dust crawls. `sky.js` is seeded for that reason and is tested for it.
 - **Thresholds belong to the vault.** `system/config.md` owns them; `THRESHOLDS` in
   `health.js` is only what to use when a vault has no config, and the panel prints which of
   the two it used.
 
 ## Testing
 
-`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 82 cases
-covering search, `segmentBody`, backlinks, `loadThresholds`, `lineCount`, the graph and
-markdown. Node's built-in runner, so there is nothing to install and still no `package.json`.
+`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 143 cases
+covering search, `segmentBody`, backlinks, `loadThresholds`, `lineCount`, the graph, the
+markdown parser, the date grammar and timeline, and the celestial geometry. Node's built-in runner, so there is nothing to install and still no `package.json`.
 
 `frontmatter.js` and `health.js` have no test file but are equally pure, and can be
 exercised from Node directly — they import cleanly and take plain objects.
