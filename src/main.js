@@ -1087,19 +1087,22 @@ function renderGraph() {
     count.textContent = String(domain.count);
     group.append(count);
 
-    // Outward along the marker's own radius, clear of the circle. Inward put
-    // six labels in a huddle around the centre, overlapping each other.
-    const dx = domain.x - current.centre.x;
-    const dy = domain.y - current.centre.y;
-    const away = Math.hypot(dx, dy) || 1;
-    // Clear the planet’s OWN moon ring. A fixed offset was right when every
-    // file sat on one shared outer ring; now each planet carries its own moons,
-    // and 26px puts the label on top of them.
+    // WHICH WAY the name leaves the planet is layout()'s decision, not this
+    // file's: it is the widest gap between that planet's own moons. Pointing it
+    // straight outward — which is what this did — puts it exactly on top of a
+    // moon label whenever the planet holds an odd number of files.
+    //
+    // HOW FAR is still decided here, because it is a drawing question. Clear
+    // the planet's OWN moon ring: a fixed offset was right when every file sat
+    // on one shared outer ring, and 26px puts the label among the moons.
+    const angle =
+      domain.labelAngle ?? Math.atan2(domain.y - current.centre.y, domain.x - current.centre.x);
     const clear = (domain.moonR ?? 14) + 20;
+    const toward = Math.cos(angle);
     const name = svg("text", {
-      x: domain.x + (dx / away) * clear,
-      y: domain.y + (dy / away) * clear + 4,
-      "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
+      x: domain.x + toward * clear,
+      y: domain.y + Math.sin(angle) * clear + 4,
+      "text-anchor": toward > 0.15 ? "start" : toward < -0.15 ? "end" : "middle",
       class: "gdom-name",
     });
     name.textContent = domain.name;
@@ -1107,7 +1110,7 @@ function renderGraph() {
     // a gradient. The plate is sized from the text once it is measured.
     const plate = svg("rect", { class: "gplate", rx: 2 });
     group.append(plate, name);
-    plates.push([plate, name]);
+    plates.push([plate, name, angle]);
 
     const open = () => setGraphView({ mode: "domain", domain: domain.name });
     group.addEventListener("click", open);
@@ -1172,16 +1175,54 @@ function renderGraph() {
   }
 
   els.graphSvg.replaceChildren(...layers.sky, ...layers.edges, ...layers.marks, ...layers.labels);
-  frameToContent(current);
 
-  // Plates can only be sized once the text is in the document and measurable.
-  for (const [plate, text] of plates) {
+  // --- label placement, which can only happen once the text is measurable ---
+  //
+  // A domain's name and a moon's label sit on the SAME RING: the name at
+  // moonR + 20, a moon's label at moonR + radiusFor(degree) + 9, which is
+  // moonR + 15 to moonR + 19. Both are horizontal text, long enough to sweep
+  // across a neighbouring angle.
+  //
+  // layout() already puts the name in the widest gap between that planet's own
+  // moons, which is what stops a moon landing exactly on it. But angular
+  // separation alone cannot promise no overlap, because how much arc a label
+  // covers depends on how long its text is — and that is not knowable until it
+  // is rendered. Sweeping all eight views found ventures X postmortem and
+  // projects X decisions colliding this way with perfectly good angles — both
+  // in EVEN-sized domains, so both predate the odd-count bug and neither would
+  // have been found by fixing it. So the promise is kept by measuring: push the
+  // name outward until nothing is in its way.
+  const moonBoxes = [...els.graphSvg.querySelectorAll(".glabel")].map((t) => t.getBBox());
+  const overlaps = (box) =>
+    moonBoxes.some(
+      (m) =>
+        box.x < m.x + m.width && m.x < box.x + box.width && box.y < m.y + m.height && m.y < box.y + box.height
+    );
+
+  const nameBoxes = [];
+  for (const [plate, text, angle] of plates) {
+    // Bounded, because an unbounded search would happily walk a name off the
+    // diagram to satisfy a constraint that no longer matters out there.
+    for (let step = 0; step < 8 && overlaps(text.getBBox()); step++) {
+      text.setAttribute("x", Number(text.getAttribute("x")) + Math.cos(angle) * 13);
+      text.setAttribute("y", Number(text.getAttribute("y")) + Math.sin(angle) * 13);
+    }
     const box = text.getBBox();
+    nameBoxes.push(box);
     plate.setAttribute("x", box.x - 5);
     plate.setAttribute("y", box.y - 2);
     plate.setAttribute("width", box.width + 10);
     plate.setAttribute("height", box.height + 4);
   }
+
+  // Framed LAST, and framed on measured text. The old order framed on bare
+  // coordinates plus a 26px guess before any label existed, so a long moon
+  // label ran off the edge and was cut in half: `discovery-method` ended at the
+  // frame boundary. A name this pass has just pushed would be worse.
+  // Reusing the boxes already measured rather than querying and measuring
+  // every label a second time. getBBox forces a layout flush, and this runs on
+  // every view change and every frame of a brush drag.
+  frameToContent(current, [...moonBoxes, ...nameBoxes]);
 
   // "Read this file" only exists when there is a file to read. The graph finds
   // things; browse is where you read one.
@@ -1199,7 +1240,7 @@ function renderGraph() {
  * Without this the domains view puts six markers in the middle of a mostly
  * empty box, because it is framed for a file ring that is not being drawn.
  */
-function frameToContent(current) {
+function frameToContent(current, labelBoxes = []) {
   const points = [...current.domains, ...current.nodes];
   if (points.length === 0) {
     els.graphSvg.setAttribute("viewBox", "0 0 720 520");
@@ -1207,17 +1248,21 @@ function frameToContent(current) {
   }
 
   // Each point reaches further than its own coordinate: a planet carries a moon
-  // ring and a label beyond that. Framing on the bare coordinates clipped the
-  // labels the moment they were pushed clear of the moons.
+  // ring, and beyond that a label whose width is not knowable until it is drawn.
+  // The reach below covers the ring, which carries no text; the measured boxes
+  // cover the text, which a guess could not. Framing on a guess is what cut
+  // `discovery-method` off at the edge of the frame.
   const reach = (p) => (p.moonR ?? 0) + 26;
-  const lefts = points.map((p) => p.x - reach(p));
-  const rights = points.map((p) => p.x + reach(p));
-  const tops = points.map((p) => p.y - reach(p));
-  const bottoms = points.map((p) => p.y + reach(p));
+  const lefts = [...points.map((p) => p.x - reach(p)), ...labelBoxes.map((b) => b.x)];
+  const rights = [...points.map((p) => p.x + reach(p)), ...labelBoxes.map((b) => b.x + b.width)];
+  const tops = [...points.map((p) => p.y - reach(p)), ...labelBoxes.map((b) => b.y)];
+  const bottoms = [...points.map((p) => p.y + reach(p)), ...labelBoxes.map((b) => b.y + b.height)];
 
-  // Labels run horizontally, so x still needs more room than y.
-  const padX = 72;
-  const padY = 30;
+  // Breathing room, not a margin for error. The wide x padding existed because
+  // label width was being guessed at; with the boxes measured it is not.
+  const measured = labelBoxes.length > 0;
+  const padX = measured ? 16 : 72;
+  const padY = measured ? 16 : 30;
 
   const minX = Math.min(...lefts) - padX;
   const minY = Math.min(...tops) - padY;

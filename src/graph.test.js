@@ -370,3 +370,59 @@ test("the caption counts the window without pretending undated files are out", (
   const s = scene(G, P, { mode: "full", window: WIN_2024 }, SPANS);
   assert.match(s.caption, /window holds 1\/2 dated, 1 undated stay lit/);
 });
+
+test("a planet's name never sits on one of its own moons", () => {
+  // t_i = mid + PI + ((i + 0.5) / n) * 2PI equals mid when i = (n - 1) / 2,
+  // which is an integer exactly when n is odd. So an odd-sized domain always
+  // had a moon on its outward radius, and the planet's label was drawn from the
+  // same point in the same direction. playbook has three files, and its name
+  // landed on top of discovery-method.
+  //
+  // This is necessary and NOT sufficient: two even-sized domains collided with
+  // perfectly good angles, because how much arc a label covers depends on how
+  // long its text is. That half is measured in the renderer, not here.
+  for (const [label, graph] of [["G", G], ["LOPSIDED", LOPSIDED]]) {
+    const positions = layout(graph);
+    for (const [name, domain] of positions.domains) {
+      const mine = graph.nodes.filter((n) => n.domain === name);
+      const step = (Math.PI * 2) / mine.length;
+      for (const n of mine) {
+        const moon = positions.nodes.get(n.path).angle;
+        const d = domain.labelAngle - moon;
+        const apart = Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
+        assert.ok(
+          apart > step / 2 - 1e-6,
+          `${label}: ${name}'s name is ${((apart * 180) / Math.PI).toFixed(1)}° from a moon`
+        );
+      }
+    }
+  }
+});
+
+test("an even number of files leaves the name exactly where it was", () => {
+  // The fix must not move the planets that were never broken — four of this
+  // vault's six domains hold an even number of files.
+  const positions = layout(G);
+  for (const [name, domain] of positions.domains) {
+    const count = G.nodes.filter((n) => n.domain === name).length;
+    if (count % 2 !== 0) continue;
+    const d = domain.labelAngle - domain.angle;
+    assert.ok(Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) < 1e-9, `${name} moved`);
+  }
+});
+
+test("a domain with one file points its name inward rather than at the moon", () => {
+  // The degenerate case, and the rule working rather than failing: the single
+  // moon sits outward, so the only gap left is the one facing the star.
+  const one = buildGraph(
+    buildModel([
+      { path: "solo/only.md", text: fm("o") + "\nlinks `[[other/x]]`\n" },
+      { path: "other/x.md", text: fm("x") + "\nlinks `[[solo/only]]`\n" },
+    ])
+  );
+  const positions = layout(one);
+  for (const [, domain] of positions.domains) {
+    const d = domain.labelAngle - domain.angle;
+    assert.ok(Math.abs(Math.abs(Math.atan2(Math.sin(d), Math.cos(d))) - Math.PI) < 1e-9);
+  }
+});

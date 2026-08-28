@@ -70,6 +70,12 @@ needed to see a change immediately after pushing.
 - **The dashboard stores nothing.** No persisted folder handle, no IndexedDB, no
   localStorage. Re-picking the vault each session is the cost of that, and it is the
   intended trade — the same kind of structural promise as read-only and no-network.
+- **Label placement is measured, not calculated.** Where a label GOES is pure maths in
+  `graph.js`; whether it collides is not knowable until it is rendered, because that
+  depends on how long its text is. `renderGraph` measures and nudges after insertion.
+  Two rules follow: keep the frame computed from those measured boxes rather than from a
+  padding guess, and reuse the boxes — `getBBox` forces a layout flush and this path runs
+  on every frame of a brush drag.
 - **Anything drawn must be deterministic.** `renderGraph` and `renderTimeline` run again on
   every view change, so geometry from `Math.random` reshuffles each time — the starfield
   shimmers, the dust crawls. `sky.js` is seeded for that reason and is tested for it.
@@ -79,9 +85,9 @@ needed to see a change immediately after pushing.
 
 ## Testing
 
-`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 143 cases
+`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 163 cases
 covering search, `segmentBody`, backlinks, `loadThresholds`, `lineCount`, the graph, the
-markdown parser, the date grammar and timeline, and the celestial geometry. Node's built-in runner, so there is nothing to install and still no `package.json`.
+markdown parser, the date grammar and timeline, the brush, and the celestial geometry. Node's built-in runner, so there is nothing to install and still no `package.json`.
 
 `frontmatter.js` and `health.js` have no test file but are equally pure, and can be
 exercised from Node directly — they import cleanly and take plain objects.

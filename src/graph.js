@@ -156,8 +156,10 @@ export function layout(graph, { cx = 0, cy = 0, rOrbit = 178, start = -Math.PI /
 
     // Moons start on the far side of the planet from the star, so the first one
     // is never hidden behind the planet's own label.
+    const moonAngles = [];
     planet.mine.forEach((n, i) => {
       const t = mid + Math.PI + ((i + 0.5) / planet.mine.length) * Math.PI * 2;
+      moonAngles.push(t);
       nodes.set(n.path, {
         angle: t,
         x: x + Math.cos(t) * planet.moonR,
@@ -172,6 +174,7 @@ export function layout(graph, { cx = 0, cy = 0, rOrbit = 178, start = -Math.PI /
 
     domains.set(planet.name, {
       angle: mid,
+      labelAngle: labelAngleFor(mid, moonAngles),
       from,
       to,
       count: planet.mine.length,
@@ -185,6 +188,48 @@ export function layout(graph, { cx = 0, cy = 0, rOrbit = 178, start = -Math.PI /
   }
 
   return { nodes, domains, centre };
+}
+
+/**
+ * Which way a planet's name leaves it.
+ *
+ * Straight outward from the star is the obvious answer and it is exactly wrong.
+ * Moons are spaced from the far side, at
+ *
+ *     t_i = mid + PI + ((i + 0.5) / n) * 2PI
+ *
+ * and solving t_i = mid gives i = (n - 1) / 2, which is an INTEGER EXACTLY WHEN
+ * n IS ODD. So every planet holding an odd number of files has a moon sitting
+ * precisely on its outward radius — and a moon's label is drawn from that same
+ * point in that same direction, so the two render on top of each other.
+ * `playbook` holds three files, and its name was drawn straight on top of
+ * `discovery-method`.
+ *
+ * No phase fixes it: shifting the moons by half a step just moves the collision
+ * to even n, and four of this vault's six domains are even. So the moons stay
+ * where they are and the NAME moves, into the widest gap between them. They are
+ * evenly spaced, so every gap is the same width and the tie breaks toward
+ * whichever gap points closest to outward — which for an even n IS outward,
+ * leaving the planets that were never broken exactly where they were.
+ *
+ * A planet with a single file is the degenerate case: its one moon is outward,
+ * so the only gap left is inward, and the name points at the star. That is the
+ * rule working, not failing — there is nowhere else for it to go.
+ */
+function labelAngleFor(mid, moonAngles) {
+  if (moonAngles.length === 0) return mid;
+  const step = (Math.PI * 2) / moonAngles.length;
+  let best = -Infinity;
+  let angle = mid;
+  for (const t of moonAngles) {
+    const candidate = t + step / 2; // midway to the next moon round
+    const outwardness = Math.cos(candidate - mid);
+    if (outwardness > best + 1e-9) {
+      best = outwardness;
+      angle = candidate;
+    }
+  }
+  return angle;
 }
 
 /**
