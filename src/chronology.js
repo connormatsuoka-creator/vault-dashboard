@@ -588,6 +588,81 @@ export function buildChronology(model, today = new Date()) {
 }
 
 /**
+ * Where a window opens when it is asked for without a pointer.
+ *
+ * "The current run of activity": everything since the last collapsed void. The
+ * alternative defaults are all worse — the whole axis filters nothing, and a
+ * fixed "last 30 days" is a guess about a vault it has not looked at. This one
+ * is read off the data: a break exists precisely because nothing happened in
+ * it, so the stretch after the last one is where the vault currently lives. On
+ * this one that is 2026-08-12 onward, seventeen days holding 39 of 53 events.
+ */
+export function defaultWindow(chronology) {
+  const scale = chronology?.scale;
+  if (!scale || scale.degenerate) return null;
+  const last = scale.breaks[scale.breaks.length - 1];
+  return { from: last ? last.to : scale.from, to: scale.to };
+}
+
+/**
+ * Move one edge of a window to the next place worth stopping.
+ *
+ * THE AXIS IS DISCRETE, and that is the whole design. This vault records 23
+ * moments; a keyboard that moved by a fixed duration would need hundreds of
+ * presses to cross nine years and would keep landing on dates where nothing
+ * happened. Stepping between the moments that EXIST crosses the entire axis in
+ * 22 presses and can never select a boundary that means nothing. It is also why
+ * the keyboard path needs no typing: there is no date to spell.
+ *
+ * Coarse steps use the axis's own labelled ticks — the months and years already
+ * drawn under the strip — so the two granularities are both things the reader
+ * can already see.
+ *
+ * The end handle names the LAST INCLUDED DAY while the window itself is
+ * half-open, so a readout can never disagree with the handle a reader just
+ * moved.
+ *
+ * @param {'from'|'to'} edge
+ * @param {number} direction -1 earlier, +1 later
+ */
+export function stepWindow(axis, window, edge, direction, coarse = false) {
+  if (!axis || axis.empty || !window) return window;
+  const stops = [...new Set((coarse ? axis.ticks : axis.events).map((p) => p.ms))].sort((a, b) => a - b);
+  if (stops.length === 0) return window;
+
+  const current = edge === "from" ? window.from : window.to - DAY;
+  const next =
+    direction < 0
+      ? [...stops].reverse().find((ms) => ms < current)
+      : stops.find((ms) => ms > current);
+  if (next === undefined) return window;
+
+  // The handles cannot cross. An edge pushed past the other stops against it
+  // rather than inverting the window under the reader.
+  if (edge === "from") return { from: Math.min(next, window.to - DAY), to: window.to };
+  return { from: window.from, to: Math.max(next, window.from) + DAY };
+}
+
+/**
+ * Send one edge as far as it can go — Home and End.
+ *
+ * "As far as it can go" rather than "to the end of the axis", because an edge
+ * is bounded by the other one as well as by the axis. End on the START handle
+ * means up against the end handle, not past it.
+ *
+ * @param {'from'|'to'} edge
+ * @param {number} direction -1 as early as possible, +1 as late as possible
+ */
+export function limitWindow(chronology, window, edge, direction) {
+  const scale = chronology?.scale;
+  if (!scale || !window) return window;
+  if (edge === "from") {
+    return direction < 0 ? { from: scale.from, to: window.to } : { from: window.to - DAY, to: window.to };
+  }
+  return direction < 0 ? { from: window.from, to: window.from + DAY } : { from: window.from, to: scale.to };
+}
+
+/**
  * The outer bounds of every dated file, keyed by path.
  *
  * This is the join between "when" and "where". The graph needs to know which
@@ -645,8 +720,8 @@ export function axisOf(chronology) {
   // strip has no rows, so the moment vanishes with nothing to stand for it.
   const events = [];
   for (const segment of scale.segments) {
-    if (events[events.length - 1] !== segment.x0) events.push(segment.x0);
-    events.push(segment.x1);
+    if (events[events.length - 1]?.x !== segment.x0) events.push({ x: segment.x0, ms: segment.from });
+    events.push({ x: segment.x1, ms: segment.to });
   }
 
   return { ticks, breaks: scale.breaks, events, today: scale.project(today), empty: false };

@@ -14,6 +14,9 @@ import assert from "node:assert/strict";
 import { buildModel } from "./model.js";
 import {
   axisOf,
+  defaultWindow,
+  stepWindow,
+  limitWindow,
   trackSpans,
   parsePart,
   parseOccurred,
@@ -574,14 +577,24 @@ test("the axis reports where events are, not only where the voids are", () => {
 
   // Every void's edges are event positions — which is exactly why a handle
   // dropped in a void must not snap to one.
+  const at = axis.events.map((e) => e.x);
   for (const band of axis.breaks) {
-    assert.ok(axis.events.includes(band.x0), "a break's start is an event position");
-    assert.ok(axis.events.includes(band.x1), "a break's end is an event position");
+    assert.ok(at.includes(band.x0), "a break's start is an event position");
+    assert.ok(at.includes(band.x1), "a break's end is an event position");
   }
 
   // Sorted and deduped, so a renderer can draw them straight through.
-  assert.deepEqual(axis.events, [...new Set(axis.events)].sort((x, y) => x - y));
-  assert.ok(axis.events.every((x) => x >= 0 && x <= 1));
+  assert.deepEqual(at, [...new Set(at)].sort((x, y) => x - y));
+  assert.ok(at.every((x) => x >= 0 && x <= 1));
+
+  // Each carries the moment it stands for, not only where to draw it. The
+  // keyboard steps between these, so a position with no date behind it would be
+  // a stop the reader could reach and nothing could explain.
+  assert.ok(axis.events.every((e) => Number.isFinite(e.ms)));
+  assert.deepEqual(
+    axis.events.map((e) => e.ms),
+    [...axis.events.map((e) => e.ms)].sort((a, b) => a - b)
+  );
 });
 
 test("the timeline and the strip read the same axis", () => {
@@ -606,4 +619,112 @@ test("an axis with no scale reports empty rather than throwing", () => {
   assert.equal(axis.empty, true);
   assert.deepEqual([axis.ticks, axis.breaks, axis.events], [[], [], []]);
   assert.equal(axis.today, null);
+});
+
+// ---------------------------------------------------------------------------
+// The keyboard path — stepping between the moments that exist
+// ---------------------------------------------------------------------------
+
+/** Three ventures and a long-running one, which is the shape of the real vault. */
+const STEPPABLE = () =>
+  buildChronology(
+    modelOf([
+      ["self/learning.md", file("occurred: 2017/")],
+      ["ventures/a.md", file("occurred: 2024-06-01")],
+      ["ventures/b.md", file("occurred: 2026-08-14/2026-08-20")],
+      ["ventures/c.md", file("occurred: 2026-08-22")],
+    ]),
+    TODAY
+  );
+
+test("a window opens on the current run of activity, with nothing typed", () => {
+  // Everything since the last collapsed void. The whole axis would filter
+  // nothing and a fixed "last 30 days" would be a guess about a vault it has
+  // not looked at; this is read off the data.
+  const chronology = STEPPABLE();
+  const win = defaultWindow(chronology);
+  const lastBreak = chronology.scale.breaks[chronology.scale.breaks.length - 1];
+
+  assert.equal(win.from, lastBreak.to);
+  assert.equal(win.to, chronology.scale.to);
+  assert.ok(win.from < win.to);
+  // And it holds the recent cluster rather than the nine dead years before it.
+  const held = chronology.tracks.filter((t) => t.from <= win.to && t.to >= win.from);
+  assert.ok(held.length >= 2, `default window held ${held.length} tracks`);
+});
+
+test("an arrow steps to the next moment that exists, not by a duration", () => {
+  const chronology = STEPPABLE();
+  const axis = axisOf(chronology);
+  const moments = [...new Set(axis.events.map((e) => e.ms))].sort((a, b) => a - b);
+
+  // Walk the start handle all the way back, one press at a time.
+  let win = { from: moments[moments.length - 1], to: chronology.scale.to };
+  const visited = [win.from];
+  for (let i = 0; i < 50; i++) {
+    const next = stepWindow(axis, win, "from", -1);
+    if (next.from === win.from) break;
+    win = next;
+    visited.push(win.from);
+  }
+
+  // Every stop is a real recorded moment, and the whole axis is crossable in
+  // about as many presses as there are moments.
+  assert.ok(visited.every((ms) => moments.includes(ms)), "landed on a moment nothing happened at");
+  assert.ok(visited.length <= moments.length, "took more presses than there are moments");
+  assert.equal(win.from, moments[0], "could not reach the start of the axis");
+});
+
+test("a coarse step uses the ticks already drawn under the strip", () => {
+  const chronology = STEPPABLE();
+  const axis = axisOf(chronology);
+  const ticks = axis.ticks.map((t) => t.ms);
+
+  const win = stepWindow(axis, { from: chronology.scale.from, to: chronology.scale.to }, "from", 1, true);
+  assert.ok(ticks.includes(win.from), "a coarse step left the labelled landmarks");
+  // Coarse must actually be coarser: it skips moments a fine step would stop at.
+  const fine = stepWindow(axis, { from: chronology.scale.from, to: chronology.scale.to }, "from", 1);
+  assert.ok(win.from >= fine.from, "the coarse step went less far than the fine one");
+});
+
+test("the handles cannot cross", () => {
+  const chronology = STEPPABLE();
+  const axis = axisOf(chronology);
+  const DAY_MS = 86_400_000;
+
+  // Drive the start handle hard against the end, and past it.
+  let win = { from: chronology.scale.from, to: chronology.scale.from + 2 * DAY_MS };
+  for (let i = 0; i < 40; i++) win = stepWindow(axis, win, "from", 1);
+  assert.ok(win.from <= win.to - DAY_MS, "start overtook end");
+
+  // And the end handle back against the start.
+  win = { from: chronology.scale.to - 2 * DAY_MS, to: chronology.scale.to };
+  for (let i = 0; i < 40; i++) win = stepWindow(axis, win, "to", -1);
+  assert.ok(win.to - DAY_MS >= win.from, "end overtook start");
+});
+
+test("Home and End send an edge as far as it can go, not past the other one", () => {
+  const chronology = STEPPABLE();
+  const win = defaultWindow(chronology);
+  const DAY_MS = 86_400_000;
+
+  assert.equal(limitWindow(chronology, win, "from", -1).from, chronology.scale.from);
+  assert.equal(limitWindow(chronology, win, "to", 1).to, chronology.scale.to);
+
+  // And the bounded direction stops against the other handle rather than
+  // inverting the window.
+  assert.equal(limitWindow(chronology, win, "from", 1).from, win.to - DAY_MS);
+  assert.equal(limitWindow(chronology, win, "to", -1).to, win.from + DAY_MS);
+  for (const [edge, dir] of [["from", 1], ["to", -1], ["from", -1], ["to", 1]]) {
+    const out = limitWindow(chronology, win, edge, dir);
+    assert.ok(out.from <= out.to - DAY_MS, `${edge}/${dir} inverted the window`);
+  }
+});
+
+test("stepping a window that does not exist changes nothing", () => {
+  const chronology = STEPPABLE();
+  const axis = axisOf(chronology);
+  assert.equal(stepWindow(axis, null, "from", 1), null);
+  assert.equal(stepWindow({ empty: true }, { from: 0, to: 1 }, "from", 1).from, 0);
+  assert.equal(defaultWindow({ scale: null }), null);
 });

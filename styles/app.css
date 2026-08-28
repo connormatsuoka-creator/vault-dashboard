@@ -1411,3 +1411,32 @@ code {
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
+
+/* --- the brush's keyboard path --------------------------------------------
+ * Both grips and the opener are transparent hit areas: a 1px handle line is
+ * not something focus can land on visibly, and a ring needs something with
+ * size. Only :focus-visible draws, so a pointer drag leaves no ring behind it.
+ * ------------------------------------------------------------------------- */
+
+.gbrush-hit,
+.gbrush-open {
+  fill: transparent;
+  stroke: none;
+}
+
+.gbrush-grip,
+.gbrush-open {
+  outline: none;
+  cursor: ew-resize;
+}
+
+.gbrush-grip:focus-visible .gbrush-handle {
+  stroke-width: 3;
+}
+
+.gbrush-grip:focus-visible .gbrush-hit,
+.gbrush-open:focus-visible {
+  fill: var(--accent-dim);
+  stroke: var(--accent);
+  stroke-width: 1;
+}
