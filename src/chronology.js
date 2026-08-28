@@ -696,7 +696,19 @@ function tickLabel(ms, totalSpan) {
  * threshold moved.
  */
 export function axisOf(chronology) {
-  const { scale, today } = chronology;
+  return axisFor(chronology?.scale, chronology?.today);
+}
+
+/**
+ * The axis of ANY scale, not only the vault's whole one.
+ *
+ * Split out because the timeline brush rebuilds a scale over just the brushed
+ * window — the strip stays the overview and the plot becomes the detail — and
+ * that detail scale needs ticks and breaks of its own. `today` is passed rather
+ * than assumed so it can be dropped when it falls outside the window: projecting
+ * it would clamp it to an edge and draw "today" at a date that is not today.
+ */
+export function axisFor(scale, today) {
   if (!scale) return { ticks: [], breaks: [], events: [], today: null, empty: true };
 
   const totalSpan = scale.to - scale.from;
@@ -724,7 +736,10 @@ export function axisOf(chronology) {
     events.push({ x: segment.x1, ms: segment.to });
   }
 
-  return { ticks, breaks: scale.breaks, events, today: scale.project(today), empty: false };
+  // Outside the scale, today is nothing to draw. project() would clamp it to an
+  // edge, putting the marker on a date that is not today.
+  const at = Number.isFinite(today) && today >= scale.from && today <= scale.to ? scale.project(today) : null;
+  return { ticks, breaks: scale.breaks, events, today: at, empty: false };
 }
 
 /**
@@ -733,14 +748,52 @@ export function axisOf(chronology) {
  * @param {object} chronology from buildChronology
  * @param {{domain?: string}} view
  */
+/**
+ * Rebuild the axis over a brushed window.
+ *
+ * This is what makes the timeline's brush a ZOOM rather than a filter, and the
+ * difference matters: dimming rows would leave the timeline's actual weakness
+ * untouched, which is that August 2026 holds 39 events crammed into 58% of the
+ * axis. Rescaling is what "focus in on a timeframe" has to mean here.
+ *
+ * The window's own edges are anchored, so a window wider than the events inside
+ * it keeps its empty margins instead of silently shrinking to fit them — the
+ * reader asked for that range and should see all of it. Breaks then recompute
+ * against the window's own median gap, so zooming into a fortnight collapses
+ * nothing and zooming into a decade still collapses the voids.
+ */
+function windowScale(chronology, window) {
+  const inside = (ms) => ms >= window.from && ms <= window.to;
+  const anchors = [window.from, window.to];
+
+  for (const track of chronology.tracks) {
+    if (track.span) {
+      if (inside(track.span.from)) anchors.push(track.span.from);
+      if (!track.span.ongoing && inside(track.span.to)) anchors.push(track.span.to);
+    }
+    for (const mark of track.marks) {
+      if (inside(mark.from)) anchors.push(mark.from);
+      if (inside(mark.to)) anchors.push(mark.to);
+    }
+  }
+  return buildScale(anchors);
+}
+
 export function timelineScene(chronology, view = {}) {
-  const { scale, tracks, undated, today } = chronology;
-  const shown = view.domain ? tracks.filter((t) => t.domain === view.domain) : tracks;
+  const { tracks, undated, today } = chronology;
+  const byDomain = view.domain ? tracks.filter((t) => t.domain === view.domain) : tracks;
+
+  // A window both rescales the axis and drops the rows it does not reach.
+  // Overlap, not containment — the same rule the graph's brush uses, so a
+  // long-running venture is not hidden by asking about a month inside it.
+  const win = view.window ?? null;
+  const shown = win ? byDomain.filter((t) => t.from <= win.to && t.to >= win.from) : byDomain;
+  const scale = win ? windowScale(chronology, win) : chronology.scale;
 
   if (!scale) {
     return {
       rows: [],
-      axis: { ticks: [], breaks: [] },
+      axis: { ticks: [], breaks: [], events: [] },
       today: null,
       undated,
       empty: true,
@@ -749,7 +802,7 @@ export function timelineScene(chronology, view = {}) {
   }
 
   const at = (t) => scale.project(t);
-  const axis = axisOf(chronology);
+  const axis = axisFor(scale, today);
 
   const rows = shown.map((track) => ({
     path: track.path,
@@ -779,7 +832,7 @@ export function timelineScene(chronology, view = {}) {
 
   const ahead = shown.reduce((sum, t) => sum + t.marks.filter((m) => m.future).length, 0);
   const caption =
-    `${shown.length} dated file${shown.length === 1 ? "" : "s"} · ` +
+    (win ? `${shown.length} of ${byDomain.length} dated files in the window · ` : `${shown.length} dated file${shown.length === 1 ? "" : "s"} · `) +
     `${scale.breaks.length} gap${scale.breaks.length === 1 ? "" : "s"} collapsed · ` +
     `${undated.length} undated` +
     (ahead ? ` · ${ahead} ahead of today` : "");

@@ -70,6 +70,16 @@ needed to see a change immediately after pushing.
 - **The dashboard stores nothing.** No persisted folder handle, no IndexedDB, no
   localStorage. Re-picking the vault each session is the cost of that, and it is the
   intended trade — the same kind of structural promise as read-only and no-network.
+- **Two brushes, one control, two meanings.** `createBrush` is a factory because
+  each instance owns a drag and a focused grip; two brushes sharing module-level state
+  would break the first time someone dragged one strip and arrowed the other. On the
+  connections the window FILTERS and nothing moves; on the timeline it ZOOMS, rebuilding
+  the scale over the window. The strips always show the whole axis — they are the
+  overview. The windows are deliberately NOT shared: linking them is a coherent design,
+  but it must be chosen, not inherited.
+- **The keyboard steps between events, never by a duration.** The axis is discrete, so
+  `stepWindow` moves to the next moment that exists. That is what removes any need to
+  type a date. Never replace it with a time step.
 - **Label placement is measured, not calculated.** Where a label GOES is pure maths in
   `graph.js`; whether it collides is not knowable until it is rendered, because that
   depends on how long its text is. `renderGraph` measures and nudges after insertion.
@@ -85,7 +95,7 @@ needed to see a change immediately after pushing.
 
 ## Testing
 
-`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 163 cases
+`node --test src/*.test.js` (pass the files; `node --test src/` does not work) — 177 cases
 covering search, `segmentBody`, backlinks, `loadThresholds`, `lineCount`, the graph, the
 markdown parser, the date grammar and timeline, the brush, and the celestial geometry. Node's built-in runner, so there is nothing to install and still no `package.json`.
 

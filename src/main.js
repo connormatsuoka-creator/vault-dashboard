@@ -91,6 +91,10 @@ const els = {
   timeline: document.getElementById("timeline"),
   timelineSvg: document.getElementById("timeline-svg"),
   timelineCaption: document.getElementById("timeline-caption"),
+  timelineBrush: document.getElementById("timeline-brush"),
+  timelineStrip: document.getElementById("timeline-strip"),
+  timelineWindow: document.getElementById("timeline-window"),
+  timelineWindowClear: document.getElementById("timeline-window-clear"),
   timelineDomain: document.getElementById("timeline-domain"),
   timelineUndated: document.getElementById("timeline-undated"),
 };
@@ -120,6 +124,10 @@ const state = {
   chronology: null,
   // The join between when and where: path -> {from, to}, undated paths absent.
   spans: null,
+
+  // The timeline's own window, separate from the graph's. See the brush header
+  // for why they are not shared.
+  timelineWindow: null,
   view: { mode: "domains" },
 
   // Raw is the default. It is the view with no parser between you and the
@@ -169,6 +177,7 @@ async function openVault() {
     state.history = [];
     els.search.value = "";
 
+    state.timelineWindow = null;
     state.graph = buildGraph(model);
     state.positions = layout(state.graph, { cx: 360, cy: 258 });
     state.view = { mode: "domains" };
@@ -218,6 +227,7 @@ function render(model) {
   renderStrip();
   renderTimelineDomains(state.chronology);
   renderTimeline();
+  timelineBrush.render();
 }
 
 /**
@@ -1298,14 +1308,24 @@ function frameToContent(current, labelBoxes = []) {
 // ---------------------------------------------------------------------------
 // The brush
 //
-// A date window dragged across the connections. Time is a FILTER here and never
-// a layout: the window changes which bodies are lit and moves none of them,
-// which is the property the whole drill-down mechanic rests on.
+// A date window, dragged or typed-free-keyboarded across a strip. BOTH PANELS
+// GET ONE, and they mean different things on purpose:
 //
-// The strip is the third consumer of one scale, alongside the timeline and the
-// health panel's staleness. A break here is the same break there, because it is
-// literally the same object — two axes computed separately would drift apart
-// the first time either threshold moved.
+//   connections  the window FILTERS. Bodies outside it dim and none of them
+//                move, because the drill-down rests on nothing ever moving.
+//   timeline     the window ZOOMS. The plot rebuilds over the window, because
+//                dimming would leave the timeline's actual weakness untouched —
+//                39 of its events are crammed into eleven days.
+//
+// The strip itself is the same control in both, and always shows the WHOLE
+// axis: it is the overview, and on the timeline the plot below it is the
+// detail. It is the third and fourth consumer of one scale, so a break means
+// the same stretch everywhere it is drawn.
+//
+// The windows are deliberately separate. Sharing one across both panels is a
+// coherent design — linked views — but it would mean zooming the timeline
+// silently dimmed the graph, and that is a surprise to choose on purpose rather
+// than to inherit from an implementation detail.
 // ---------------------------------------------------------------------------
 
 const STRIP = { minWidth: 340, padL: 12, padR: 12, height: 50, top: 10, bottom: 32, minTickGap: 58 };
@@ -1318,274 +1338,305 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 /** Midnight at the start of the day a moment falls in. */
 const floorDay = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
 
-function renderStrip() {
-  const axis = state.chronology ? axisOf(state.chronology) : { empty: true };
+/**
+ * One brush, bound to one strip.
+ *
+ * Everything below is per-instance state — the drag in progress, which grip to
+ * hand focus back to — which is exactly why this is a factory and not a pair of
+ * module-level variables. Two brushes sharing one `dragFrom` would have been a
+ * bug waiting for the first person to drag one strip and arrow the other.
+ */
+function createBrush({ container, strip, readout, clear, hint, getWindow, setWindow }) {
+  let focus = null;
+  let dragFrom = null;
+  let dragTo = null;
+  let dragFromUnit = 0;
+  let dragToUnit = 0;
+  let dragFrame = 0;
 
-  // No dated file means no axis to brush. Hiding the control is better than
-  // offering one that cannot do anything.
-  els.graphBrush.hidden = axis.empty;
-  if (axis.empty) return;
-
-  const width = Math.max(STRIP.minWidth, els.graphBrush.clientWidth);
-  const plot = width - STRIP.padL - STRIP.padR;
-  const at = (unit) => STRIP.padL + unit * plot;
-  const { top, bottom } = STRIP;
-
-  els.graphStrip.setAttribute("viewBox", `0 0 ${width} ${STRIP.height}`);
-  els.graphStrip.setAttribute("width", width);
-  els.graphStrip.setAttribute("height", STRIP.height);
-
-  const parts = [svg("rect", { x: STRIP.padL, y: top, width: plot, height: bottom - top, class: "gbrush-track" })];
-
-  for (const band of axis.breaks) {
-    const x0 = at(band.x0);
-    parts.push(
-      titled(
-        svg("rect", { x: x0, y: top, width: Math.max(2, at(band.x1) - x0), height: bottom - top, class: "gbrush-break" }),
-        `${band.label} with no dated entries — a handle dropped here snaps inside it`
-      )
-    );
+  /** Where the pointer is on the axis, as a 0..1 position. */
+  function unitAt(event) {
+    const box = strip.getBoundingClientRect();
+    const plot = box.width - STRIP.padL - STRIP.padR;
+    if (plot <= 0) return 0;
+    return Math.min(1, Math.max(0, (event.clientX - box.left - STRIP.padL) / plot));
   }
 
-  // Every recorded moment, drawn before the ticks so a label always wins.
-  // These are what you aim a brush at.
-  for (const position of axis.events) {
-    const x = at(position.x);
-    parts.push(svg("line", { x1: x, y1: top + 3, x2: x, y2: bottom - 3, class: "gbrush-event" }));
-  }
-
-  let lastTick = -Infinity;
-  for (const tick of axis.ticks) {
-    const x = at(tick.x);
-    if (x - lastTick < STRIP.minTickGap) continue;
-    lastTick = x;
-    parts.push(svg("line", { x1: x, y1: bottom, x2: x, y2: bottom + 3, class: "gbrush-tick" }));
-    // The end labels turn to face inward rather than centring on their tick.
-    // The first tick sits at x = padL, and a centred label there runs off the
-    // left of the viewBox and is simply cut in half.
-    const label = svg("text", {
-      x,
-      y: bottom + 13,
-      class: "gbrush-tick-label",
-      "text-anchor": x < 30 ? "start" : x > width - 30 ? "end" : "middle",
-    });
-    label.textContent = tick.label;
-    parts.push(label);
-  }
-
-  if (axis.today !== null) {
-    const x = at(axis.today);
-    parts.push(titled(svg("line", { x1: x, y1: top - 3, x2: x, y2: bottom + 3, class: "gbrush-today" }), "today"));
-  }
-
-  const win = state.view.window;
-  const scale = state.chronology.scale;
-
-  if (win) {
-    const x0 = at(scale.project(win.from));
-    const x1 = at(scale.project(win.to));
-    parts.push(svg("rect", { x: x0, y: top, width: Math.max(2, x1 - x0), height: bottom - top, class: "gbrush-window" }));
-
-    // Each edge is a real slider. Tab to it and arrow it between the moments the
-    // vault actually records — see stepWindow for why the axis being discrete is
-    // what makes a keyboard path possible without typing a date.
-    //
-    // The end handle names the LAST INCLUDED day, which is why it reads
-    // win.to - a day: the window is half-open, and a handle that announced a
-    // date the window did not include would be lying to the one reader who
-    // cannot see where it is.
-    for (const [edge, x, ms] of [
-      ["from", x0, win.from],
-      ["to", x1, win.to - DAY_MS],
-    ]) {
-      const grip = svg("g", {
-        class: `gbrush-grip gbrush-grip--${edge}`,
-        tabindex: "0",
-        role: "slider",
-        "aria-label": edge === "from" ? "Window start" : "Window end",
-        "aria-valuemin": String(scale.from),
-        "aria-valuemax": String(scale.to),
-        "aria-valuenow": String(ms),
-        // aria-valuenow is a millisecond count, which is unspeakable. This is
-        // what actually gets read out.
-        "aria-valuetext": isoDay(ms),
-      });
-      grip.append(svg("line", { x1: x, y1: top - 4, x2: x, y2: bottom + 4, class: "gbrush-handle" }));
-      // A one-pixel line is not a target. This is what takes the focus ring.
-      grip.append(svg("rect", { x: x - 6, y: top - 4, width: 12, height: bottom - top + 8, class: "gbrush-hit" }));
-      grip.addEventListener("keydown", (event) => onBrushKey(event, edge));
-      grip.addEventListener("focus", () => (brushFocus = edge));
-      parts.push(grip);
-    }
-  } else {
-    // With no window there are no handles, so there would be nothing to tab to
-    // and no way in at all. The track itself becomes the control.
-    const opener = svg("rect", {
-      x: STRIP.padL,
-      y: top,
-      width: plot,
-      height: bottom - top,
-      class: "gbrush-open",
-      tabindex: "0",
-      role: "button",
-      "aria-label": "Set a date window. Press Enter to open one on the current run of activity.",
-    });
-    opener.addEventListener("keydown", onBrushOpenKey);
-    opener.addEventListener("focus", () => (brushFocus = "open"));
-    parts.push(opener);
-  }
-
-  // replaceChildren destroys whatever had focus. Without restoring it a keyboard
-  // reader would be thrown back to the top of the document on every arrow press,
-  // which is not a keyboard path at all.
-  const hadFocus = els.graphStrip.contains(document.activeElement);
-  els.graphStrip.replaceChildren(...parts);
-  if (hadFocus && brushFocus) {
-    els.graphStrip
-      .querySelector(brushFocus === "open" ? ".gbrush-open" : `.gbrush-grip--${brushFocus}`)
-      ?.focus({ preventScroll: true });
-  }
-  els.graphWindowClear.hidden = !win;
-  // to is exclusive — midnight ending the last included day — so the readout
-  // names that day rather than the one after it.
-  els.graphWindow.textContent = win
-    ? `${isoDay(win.from)} → ${isoDay(win.to - 1)} · ${humanDuration(win.to - win.from)}`
-    : "Drag across the strip, or focus it and press Enter. Files with no date are never dimmed.";
-}
-
-// --- the keyboard path ------------------------------------------------------
-//
-// No date is ever typed. The axis is discrete — this vault records 23 moments —
-// so an arrow steps between the moments that EXIST rather than by a duration,
-// which crosses nine years in 22 presses and can never land on a boundary that
-// means nothing. chronology.js owns the stepping and is tested in Node; this
-// only binds keys to it.
-
-/** Which part of the strip to hand focus back to after a re-render. */
-let brushFocus = null;
-
-function onBrushKey(event, edge) {
-  if (!state.chronology?.scale || !state.view.window) return;
-  const axis = axisOf(state.chronology);
-  const win = state.view.window;
-  let next;
-
-  switch (event.key) {
-    case "ArrowLeft":
-    case "ArrowDown":
-      next = stepWindow(axis, win, edge, -1, event.shiftKey);
-      break;
-    case "ArrowRight":
-    case "ArrowUp":
-      next = stepWindow(axis, win, edge, 1, event.shiftKey);
-      break;
-    case "Home":
-      next = limitWindow(state.chronology, win, edge, -1);
-      break;
-    case "End":
-      next = limitWindow(state.chronology, win, edge, 1);
-      break;
-    case "Escape":
-      brushFocus = "open";
-      event.preventDefault();
-      setGraphWindow(null);
-      return;
-    default:
-      return;
-  }
-
-  // Arrows scroll the page by default, which would move the strip out from
-  // under the reader on every press.
-  event.preventDefault();
-  brushFocus = edge;
-  setGraphWindow(next);
-}
-
-function onBrushOpenKey(event) {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  const win = defaultWindow(state.chronology);
-  if (!win) return;
-  // Focus moves to the start handle, because the opener it is currently on is
-  // about to stop existing.
-  brushFocus = "from";
-  setGraphWindow(win);
-}
-
-// --- dragging ---------------------------------------------------------------
-//
-// Coalesced to one redraw per animation frame, because pointermove fires faster
-// than frames and would otherwise run the same work several times for a single
-// picture. It is not a performance rescue: a full renderGraph is ~7ms and holds
-// 60fps redrawn every frame, with room to spare. The frame gate just stops the
-// waste.
-
-let dragFrom = null;
-let dragTo = null;
-let dragFromUnit = 0;
-let dragToUnit = 0;
-let dragFrame = 0;
-
-/** Where the pointer is on the axis, as a 0..1 position. */
-function unitAt(event) {
-  const box = els.graphStrip.getBoundingClientRect();
-  const plot = box.width - STRIP.padL - STRIP.padR;
-  if (plot <= 0) return 0;
-  return Math.min(1, Math.max(0, (event.clientX - box.left - STRIP.padL) / plot));
-}
-
-function commitDrag() {
-  dragFrame = 0;
-  if (dragFrom === null) return;
-
-  // Was this a drag at all? Measured in PIXELS, because that is the gesture
-  // being classified. A press with no movement means no window, not a window of
-  // zero width — nothing would survive that filter and nobody asked for it.
-  // Measuring it in days instead would make a deliberate single-day selection
-  // in the dense August stretch indistinguishable from a click.
-  const plot = els.graphStrip.getBoundingClientRect().width - STRIP.padL - STRIP.padR;
-  if (Math.abs(dragToUnit - dragFromUnit) * plot < 3) {
-    setGraphWindow(null);
-    return;
-  }
-
-  // A window is a range of DAYS, not of instants. A drag lands mid-day at both
-  // ends, so both those days are included whole. Without this the readout shows
-  // two dates and a duration that contradict them: 08-19 to 08-25, "5 days".
-  const from = floorDay(Math.min(dragFrom, dragTo));
-  const to = floorDay(Math.max(dragFrom, dragTo)) + DAY_MS;
-  setGraphWindow({ from, to });
-}
-
-els.graphStrip.addEventListener("pointerdown", (event) => {
-  const scale = state.chronology?.scale;
-  if (!scale) return;
-  els.graphStrip.setPointerCapture(event.pointerId);
-  dragFromUnit = dragToUnit = unitAt(event);
-  dragFrom = dragTo = scale.resolve(dragFromUnit).ms;
-  commitDrag();
-});
-
-els.graphStrip.addEventListener("pointermove", (event) => {
-  if (dragFrom === null) return;
-  dragToUnit = unitAt(event);
-  dragTo = state.chronology.scale.resolve(dragToUnit).ms;
-  if (!dragFrame) dragFrame = requestAnimationFrame(commitDrag);
-});
-
-for (const type of ["pointerup", "pointercancel"]) {
-  els.graphStrip.addEventListener(type, () => {
+  function commitDrag() {
+    dragFrame = 0;
     if (dragFrom === null) return;
-    if (dragFrame) cancelAnimationFrame(dragFrame);
+
+    // Was this a drag at all? Measured in PIXELS, because that is the gesture
+    // being classified. A press with no movement means no window, not a window
+    // of zero width. Measuring it in days instead would make a deliberate
+    // single-day selection in the dense August stretch look like a click.
+    const plot = strip.getBoundingClientRect().width - STRIP.padL - STRIP.padR;
+    if (Math.abs(dragToUnit - dragFromUnit) * plot < 3) {
+      setWindow(null);
+      return;
+    }
+
+    // A window is a range of DAYS, not instants. A drag lands mid-day at both
+    // ends, so both those days are included whole — otherwise the readout shows
+    // two dates and a duration that contradict them.
+    setWindow({
+      from: floorDay(Math.min(dragFrom, dragTo)),
+      to: floorDay(Math.max(dragFrom, dragTo)) + DAY_MS,
+    });
+  }
+
+  // --- the keyboard path ----------------------------------------------------
+  //
+  // No date is ever typed. The axis is discrete — this vault records 23 moments
+  // — so an arrow steps between the moments that EXIST rather than by a
+  // duration. chronology.js owns the stepping and is tested in Node; this only
+  // binds keys to it.
+
+  function onKey(event, edge) {
+    const win = getWindow();
+    if (!state.chronology?.scale || !win) return;
+    const axis = axisOf(state.chronology);
+    let next;
+
+    switch (event.key) {
+      case "ArrowLeft":
+      case "ArrowDown":
+        next = stepWindow(axis, win, edge, -1, event.shiftKey);
+        break;
+      case "ArrowRight":
+      case "ArrowUp":
+        next = stepWindow(axis, win, edge, 1, event.shiftKey);
+        break;
+      case "Home":
+        next = limitWindow(state.chronology, win, edge, -1);
+        break;
+      case "End":
+        next = limitWindow(state.chronology, win, edge, 1);
+        break;
+      case "Escape":
+        focus = "open";
+        event.preventDefault();
+        setWindow(null);
+        return;
+      default:
+        return;
+    }
+
+    // Arrows scroll the page by default, which would move the strip out from
+    // under the reader on every press.
+    event.preventDefault();
+    focus = edge;
+    setWindow(next);
+  }
+
+  function onOpenKey(event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    const win = defaultWindow(state.chronology);
+    if (!win) return;
+    // Focus moves to the start handle, because the opener it is on is about to
+    // stop existing.
+    focus = "from";
+    setWindow(win);
+  }
+
+  function render() {
+    const axis = state.chronology ? axisOf(state.chronology) : { empty: true };
+
+    // No dated file means no axis to brush. Hiding the control is better than
+    // offering one that cannot do anything.
+    container.hidden = axis.empty;
+    if (axis.empty) return;
+
+    const width = Math.max(STRIP.minWidth, container.clientWidth);
+    const plot = width - STRIP.padL - STRIP.padR;
+    const at = (unit) => STRIP.padL + unit * plot;
+    const { top, bottom } = STRIP;
+
+    strip.setAttribute("viewBox", `0 0 ${width} ${STRIP.height}`);
+    strip.setAttribute("width", width);
+    strip.setAttribute("height", STRIP.height);
+
+    const parts = [svg("rect", { x: STRIP.padL, y: top, width: plot, height: bottom - top, class: "gbrush-track" })];
+
+    for (const band of axis.breaks) {
+      const x0 = at(band.x0);
+      parts.push(
+        titled(
+          svg("rect", { x: x0, y: top, width: Math.max(2, at(band.x1) - x0), height: bottom - top, class: "gbrush-break" }),
+          `${band.label} with no dated entries — a handle dropped here snaps inside it`
+        )
+      );
+    }
+
+    // Every recorded moment, drawn before the ticks so a label always wins.
+    // These are what you aim a brush at, and what an arrow key steps between.
+    for (const position of axis.events) {
+      const x = at(position.x);
+      parts.push(svg("line", { x1: x, y1: top + 3, x2: x, y2: bottom - 3, class: "gbrush-event" }));
+    }
+
+    let lastTick = -Infinity;
+    for (const tick of axis.ticks) {
+      const x = at(tick.x);
+      if (x - lastTick < STRIP.minTickGap) continue;
+      lastTick = x;
+      parts.push(svg("line", { x1: x, y1: bottom, x2: x, y2: bottom + 3, class: "gbrush-tick" }));
+      // The end labels turn to face inward rather than centring on their tick.
+      // The first tick sits at x = padL, and a centred label there runs off the
+      // left of the viewBox and is simply cut in half.
+      const label = svg("text", {
+        x,
+        y: bottom + 13,
+        class: "gbrush-tick-label",
+        "text-anchor": x < 30 ? "start" : x > width - 30 ? "end" : "middle",
+      });
+      label.textContent = tick.label;
+      parts.push(label);
+    }
+
+    if (axis.today !== null) {
+      const x = at(axis.today);
+      parts.push(titled(svg("line", { x1: x, y1: top - 3, x2: x, y2: bottom + 3, class: "gbrush-today" }), "today"));
+    }
+
+    const win = getWindow();
+    const scale = state.chronology.scale;
+
+    if (win) {
+      const x0 = at(scale.project(win.from));
+      const x1 = at(scale.project(win.to));
+      parts.push(svg("rect", { x: x0, y: top, width: Math.max(2, x1 - x0), height: bottom - top, class: "gbrush-window" }));
+
+      // Each edge is a real slider. The end handle names the LAST INCLUDED day,
+      // which is why it reads win.to minus a day: the window is half-open, and a
+      // handle that announced a date the window excludes would be lying to the
+      // one reader who cannot see where it is.
+      for (const [edge, x, ms] of [
+        ["from", x0, win.from],
+        ["to", x1, win.to - DAY_MS],
+      ]) {
+        const grip = svg("g", {
+          class: `gbrush-grip gbrush-grip--${edge}`,
+          tabindex: "0",
+          role: "slider",
+          "aria-label": edge === "from" ? "Window start" : "Window end",
+          "aria-valuemin": String(scale.from),
+          "aria-valuemax": String(scale.to),
+          "aria-valuenow": String(ms),
+          // aria-valuenow is a millisecond count, which is unspeakable. This is
+          // what actually gets read out.
+          "aria-valuetext": isoDay(ms),
+        });
+        grip.append(svg("line", { x1: x, y1: top - 4, x2: x, y2: bottom + 4, class: "gbrush-handle" }));
+        // A one-pixel line is not a target. This is what takes the focus ring.
+        grip.append(svg("rect", { x: x - 6, y: top - 4, width: 12, height: bottom - top + 8, class: "gbrush-hit" }));
+        grip.addEventListener("keydown", (event) => onKey(event, edge));
+        grip.addEventListener("focus", () => (focus = edge));
+        parts.push(grip);
+      }
+    } else {
+      // With no window there are no handles, so there would be nothing to tab to
+      // and no way in at all. The track itself becomes the control.
+      const opener = svg("rect", {
+        x: STRIP.padL,
+        y: top,
+        width: plot,
+        height: bottom - top,
+        class: "gbrush-open",
+        tabindex: "0",
+        role: "button",
+        "aria-label": "Set a date window. Press Enter to open one on the current run of activity.",
+      });
+      opener.addEventListener("keydown", onOpenKey);
+      opener.addEventListener("focus", () => (focus = "open"));
+      parts.push(opener);
+    }
+
+    // replaceChildren destroys whatever had focus. Without restoring it a
+    // keyboard reader is thrown back to the top of the document on every arrow
+    // press, which is not a keyboard path at all. Restored only when this strip
+    // HELD focus, so an unrelated re-render never steals it.
+    const hadFocus = strip.contains(document.activeElement);
+    strip.replaceChildren(...parts);
+    if (hadFocus && focus) {
+      strip.querySelector(focus === "open" ? ".gbrush-open" : `.gbrush-grip--${focus}`)?.focus({ preventScroll: true });
+    }
+
+    clear.hidden = !win;
+    // to is exclusive — midnight ending the last included day — so the readout
+    // names that day rather than the one after it.
+    readout.textContent = win
+      ? `${isoDay(win.from)} → ${isoDay(win.to - 1)} · ${humanDuration(win.to - win.from)}`
+      : hint;
+  }
+
+  // Coalesced to one redraw per animation frame, because pointermove fires
+  // faster than frames and would otherwise run the same work several times for
+  // a single picture.
+  strip.addEventListener("pointerdown", (event) => {
+    const scale = state.chronology?.scale;
+    if (!scale) return;
+    strip.setPointerCapture(event.pointerId);
+    dragFromUnit = dragToUnit = unitAt(event);
+    dragFrom = dragTo = scale.resolve(dragFromUnit).ms;
     commitDrag();
-    dragFrom = dragTo = null;
   });
+
+  strip.addEventListener("pointermove", (event) => {
+    if (dragFrom === null) return;
+    dragToUnit = unitAt(event);
+    dragTo = state.chronology.scale.resolve(dragToUnit).ms;
+    if (!dragFrame) dragFrame = requestAnimationFrame(commitDrag);
+  });
+
+  for (const type of ["pointerup", "pointercancel"]) {
+    strip.addEventListener(type, () => {
+      if (dragFrom === null) return;
+      if (dragFrame) cancelAnimationFrame(dragFrame);
+      commitDrag();
+      dragFrom = dragTo = null;
+    });
+  }
+
+  clear.addEventListener("click", () => {
+    focus = null;
+    setWindow(null);
+  });
+
+  return { render };
 }
 
-els.graphWindowClear.addEventListener("click", () => {
-  brushFocus = null;
-  setGraphWindow(null);
+/** The connections brush: the window filters, and moves nothing. */
+const graphBrush = createBrush({
+  container: els.graphBrush,
+  strip: els.graphStrip,
+  readout: els.graphWindow,
+  clear: els.graphWindowClear,
+  hint: "Drag across the strip, or focus it and press Enter. Files with no date are never dimmed.",
+  getWindow: () => state.view.window ?? null,
+  setWindow: (win) => setGraphWindow(win),
 });
+
+/** The timeline brush: the window zooms. */
+const timelineBrush = createBrush({
+  container: els.timelineBrush,
+  strip: els.timelineStrip,
+  readout: els.timelineWindow,
+  clear: els.timelineWindowClear,
+  hint: "Drag across the strip, or focus it and press Enter, to zoom in on a stretch of time.",
+  getWindow: () => state.timelineWindow,
+  setWindow: (win) => {
+    state.timelineWindow = win;
+    renderTimeline();
+    timelineBrush.render();
+  },
+});
+
+/** Hoisted so the render pipeline above can call it without knowing about brushes. */
+function renderStrip() {
+  graphBrush.render();
+}
 
 const TL = { minWidth: 760, labelWidth: 232, rightPad: 28, top: 46, rowHeight: 24, bottom: 30, minTickGap: 54 };
 
@@ -1595,6 +1646,28 @@ function titled(node, text) {
   title.textContent = text;
   node.append(title);
   return node;
+}
+
+/**
+ * How many characters of a path fit in the label gutter.
+ *
+ * MEASURED, not chosen. The gutter width and the character cap are two numbers
+ * that have to agree, they were each maintained by hand, and they had drifted
+ * four pixels apart: five of this vault's paths rendered 224px wide against a
+ * 220px anchor and lost their first character off the left of the viewBox —
+ * "projects/..." read as "rojects/...".
+ *
+ * The face is monospace, so one probe settles every label. Not cached, because
+ * caching it would freeze whatever the metrics were before the webfont
+ * finished loading.
+ */
+function labelChars() {
+  const probe = svg("text", { x: -9999, y: -9999, class: "tl-label" });
+  probe.textContent = "0".repeat(40);
+  els.timelineSvg.append(probe);
+  const per = probe.getBBox().width / 40;
+  probe.remove();
+  return per > 0 ? Math.floor((TL.labelWidth - 16) / per) : 32;
 }
 
 /** Long paths lose their middle, not their end — the filename is the identifying part. */
@@ -1608,7 +1681,10 @@ function shortPath(path, max = 34) {
 function renderTimeline() {
   if (!state.chronology) return;
 
-  const view = els.timelineDomain.value ? { domain: els.timelineDomain.value } : {};
+  const view = {
+    ...(els.timelineDomain.value ? { domain: els.timelineDomain.value } : {}),
+    ...(state.timelineWindow ? { window: state.timelineWindow } : {}),
+  };
   const scene = timelineScene(state.chronology, view);
   els.timelineCaption.textContent = scene.caption;
 
@@ -1640,6 +1716,7 @@ function renderTimeline() {
 
   const plotTop = TL.top - 14;
   const plotBottom = height - TL.bottom + 6;
+  const fits = labelChars();
 
   // ---- break bands, behind everything ------------------------------------
   for (const band of scene.axis.breaks) {
@@ -1708,7 +1785,7 @@ function renderTimeline() {
     );
 
     const label = svg("text", { x: TL.labelWidth - 12, y: y + 16, class: "tl-label", "text-anchor": "end" });
-    label.textContent = shortPath(row.path);
+    label.textContent = shortPath(row.path, fits);
     group.append(label);
 
     if (row.bar) {
@@ -1842,6 +1919,7 @@ els.viewGraph.addEventListener("click", () => {
 });
 els.viewTimeline.addEventListener("click", () => {
   showOnly("timeline");
+  timelineBrush.render();
   // The width is measured from the panel, which is display:none until now — so
   // the first render inside render() always measures zero and falls back to the
   // minimum. Re-render once it can actually be measured.
@@ -1854,7 +1932,10 @@ els.timelineDomain.addEventListener("change", renderTimeline);
 // changes size. Redrawing ~20 rows is microseconds; a debounce would only add
 // a timer to reason about.
 window.addEventListener("resize", () => {
-  if (!els.timeline.hidden) renderTimeline();
+  if (!els.timeline.hidden) {
+    renderTimeline();
+    timelineBrush.render();
+  }
   if (!els.graph.hidden) renderStrip();
 });
 

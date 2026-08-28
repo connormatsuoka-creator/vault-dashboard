@@ -208,6 +208,25 @@
           <p id="timeline-caption" class="graph-caption"></p>
         </div>
 
+        <!--
+          The same brush the connections panel carries, doing the other useful
+          thing with a window: here it ZOOMS. The strip always shows the whole
+          axis — it is the overview — and the plot below redraws over just the
+          brushed stretch. Dimming rows would leave this panel's actual weakness
+          untouched, which is that 39 of the vault's events fall inside eleven
+          days and stack on top of each other.
+        -->
+        <div id="timeline-brush" class="gbrush" hidden>
+          <svg id="timeline-strip" class="gbrush-strip" role="img"
+               aria-label="Zoom the timeline to a stretch of time"></svg>
+          <div class="gbrush-foot">
+            <p id="timeline-window" class="gbrush-readout"></p>
+            <button id="timeline-window-clear" class="button button--small" type="button" hidden>
+              Show all time
+            </button>
+          </div>
+        </div>
+
         <div class="tl-scroll">
           <svg id="timeline-svg" class="tl-svg" role="img" aria-label="Vault timeline"></svg>
         </div>

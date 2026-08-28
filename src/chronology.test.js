@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { buildModel } from "./model.js";
 import {
   axisOf,
+  axisFor,
   defaultWindow,
   stepWindow,
   limitWindow,
@@ -727,4 +728,117 @@ test("stepping a window that does not exist changes nothing", () => {
   assert.equal(stepWindow(axis, null, "from", 1), null);
   assert.equal(stepWindow({ empty: true }, { from: 0, to: 1 }, "from", 1).from, 0);
   assert.equal(defaultWindow({ scale: null }), null);
+});
+
+// ---------------------------------------------------------------------------
+// The timeline's brush zooms — it does not merely dim
+// ---------------------------------------------------------------------------
+
+/** Nine years of near-nothing, then a dense fortnight. The real vault's shape. */
+const CLUSTERED = () =>
+  buildChronology(
+    modelOf([
+      ["self/learning.md", file("occurred: 2017/")],
+      ["ventures/old.md", file("occurred: 2024-06-01")],
+      ["ventures/a.md", file("occurred: 2026-08-14")],
+      ["ventures/b.md", file("occurred: 2026-08-16")],
+      ["ventures/c.md", file("occurred: 2026-08-18")],
+      ["ventures/d.md", file("occurred: 2026-08-20")],
+    ]),
+    TODAY
+  );
+
+const day = (iso) => Date.parse(iso + "T00:00:00Z");
+
+test("a window rescales the timeline instead of dimming it", () => {
+  // The timeline's weakness is that its events cluster: without a zoom the
+  // dense fortnight is squeezed against one edge no matter what is highlighted.
+  const chronology = CLUSTERED();
+  const whole = timelineScene(chronology);
+  const zoomed = timelineScene(chronology, { window: { from: day("2026-08-14"), to: day("2026-08-21") } });
+
+  // Rows outside the window are GONE, not faded.
+  assert.ok(zoomed.rows.length < whole.rows.length);
+  assert.equal(zoomed.rows.some((r) => r.path === "ventures/old.md"), false);
+
+  // And the cluster now uses the width instead of stacking. Measured ACROSS
+  // THE CLUSTER — a to d — because the outer extent of all rows is dominated by
+  // the ongoing 2017 span in both views and so measures nothing.
+  const cluster = (scene) => {
+    const x = (path) => scene.rows.find((r) => r.path === path)?.bar?.x0;
+    return x("ventures/d.md") - x("ventures/a.md");
+  };
+  assert.ok(
+    cluster(zoomed) > cluster(whole) * 2,
+    `cluster spans ${cluster(zoomed).toFixed(3)} zoomed vs ${cluster(whole).toFixed(3)} whole`
+  );
+});
+
+test("zooming into a fortnight collapses nothing", () => {
+  // Breaks recompute against the window's own median gap, so a tight window has
+  // no voids worth collapsing and a wide one still does.
+  const chronology = CLUSTERED();
+  const tight = timelineScene(chronology, { window: { from: day("2026-08-14"), to: day("2026-08-21") } });
+  const wide = timelineScene(chronology);
+
+  assert.equal(tight.axis.breaks.length, 0, "a fortnight should hold no collapsed voids");
+  assert.ok(wide.axis.breaks.length > 0, "nine years should still collapse");
+});
+
+test("a window keeps the empty margins the reader asked for", () => {
+  // Events run 08-14 to 08-20; the window is the whole month. Shrinking to fit
+  // the contents would answer a question the reader did not ask.
+  const chronology = CLUSTERED();
+  const scene = timelineScene(chronology, { window: { from: day("2026-08-01"), to: day("2026-08-31") } });
+
+  // Measured on a bar that STARTS inside the window. self/learning.md is
+  // occurred: 2017/ and running, so it correctly begins hard against the left
+  // edge — it really did start before the window, and clamping says so.
+  const first = scene.rows.find((r) => r.path === "ventures/a.md").bar.x0;
+  assert.ok(first > 0.35 && first < 0.5, `08-14 sits at ${first.toFixed(3)} of an 08-01 to 08-31 window`);
+  assert.equal(scene.rows.find((r) => r.path === "self/learning.md").bar.x0, 0);
+});
+
+test("a window selects rows by overlap, like the graph's brush", () => {
+  // self/learning.md is occurred: 2017/ and still running, so it is present
+  // during any window — the same rule the graph uses, and for the same reason.
+  const chronology = CLUSTERED();
+  const scene = timelineScene(chronology, { window: { from: day("2026-08-14"), to: day("2026-08-21") } });
+  assert.ok(scene.rows.some((r) => r.path === "self/learning.md"), "an ongoing span was dropped");
+});
+
+test("today is not drawn at a date that is not today", () => {
+  // Outside the window, project() would clamp today to an edge and the marker
+  // would sit on the wrong date rather than being absent.
+  const chronology = CLUSTERED();
+  const past = timelineScene(chronology, { window: { from: day("2024-06-01"), to: day("2024-07-01") } });
+  assert.equal(past.today, null);
+
+  const now = timelineScene(chronology, { window: { from: day("2026-08-14"), to: day("2026-08-30") } });
+  assert.ok(now.today !== null, "today falls inside this window and should be drawn");
+});
+
+test("the caption says how much the window is hiding", () => {
+  const chronology = CLUSTERED();
+  const scene = timelineScene(chronology, { window: { from: day("2026-08-14"), to: day("2026-08-21") } });
+  assert.match(scene.caption, /\d+ of \d+ dated files in the window/);
+  // Undated files are counted whole: a window cannot exclude a file that has no
+  // date, so their number does not change with it.
+  assert.match(scene.caption, new RegExp(`${chronology.undated.length} undated`));
+});
+
+test("a window composes with the domain filter rather than replacing it", () => {
+  const chronology = CLUSTERED();
+  const win = { from: day("2026-08-14"), to: day("2026-08-21") };
+  const both = timelineScene(chronology, { domain: "ventures", window: win });
+  assert.ok(both.rows.length > 0);
+  assert.ok(both.rows.every((r) => r.domain === "ventures"), "the domain filter was dropped");
+  assert.equal(both.rows.some((r) => r.path === "ventures/old.md"), false, "the window was dropped");
+});
+
+test("axisFor gives any scale an axis, not only the vault's whole one", () => {
+  const chronology = CLUSTERED();
+  const full = axisFor(chronology.scale, chronology.today);
+  assert.deepEqual(full, axisOf(chronology));
+  assert.equal(axisFor(null, 0).empty, true);
 });
