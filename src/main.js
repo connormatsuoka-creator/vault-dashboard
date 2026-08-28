@@ -16,7 +16,7 @@ import { runHealthChecks, loadThresholds } from "./health.js";
 import { searchVault, MAX_RESULTS } from "./search.js";
 import { buildGraph, layout, scene } from "./graph.js";
 import { parseMarkdown } from "./markdown.js";
-import { buildChronology, timelineScene } from "./chronology.js";
+import { buildChronology, timelineScene, axisOf, trackSpans, humanDuration } from "./chronology.js";
 import { icon, setIconLabel, statusDot } from "./icons.js";
 import { starfield, planetLighting, planetToken, lightingBucket, bucketLighting, dustCloud } from "./sky.js";
 
@@ -71,6 +71,10 @@ const els = {
   graphSvg: document.getElementById("graph-svg"),
   graphCaption: document.getElementById("graph-caption"),
   graphNote: document.getElementById("graph-note"),
+  graphBrush: document.getElementById("graph-brush"),
+  graphStrip: document.getElementById("graph-strip"),
+  graphWindow: document.getElementById("graph-window"),
+  graphWindowClear: document.getElementById("graph-window-clear"),
   graphHome: document.getElementById("graph-home"),
   graphFull: document.getElementById("graph-full"),
   graphOpen: document.getElementById("graph-open"),
@@ -105,6 +109,8 @@ const state = {
 
   // Computed once per vault, like the graph and for the same reason.
   chronology: null,
+  // The join between when and where: path -> {from, to}, undated paths absent.
+  spans: null,
   view: { mode: "domains" },
 
   // Raw is the default. It is the view with no parser between you and the
@@ -193,9 +199,14 @@ function render(model) {
   renderDomains(model);
   renderBrowseList("");
   clearFile();
-  renderGraph();
 
+  // Before renderGraph, not after: the graph now asks the chronology which
+  // files were live inside a brushed window, so the dates have to exist first.
   state.chronology = buildChronology(model);
+  state.spans = trackSpans(state.chronology);
+
+  renderGraph();
+  renderStrip();
   renderTimelineDomains(state.chronology);
   renderTimeline();
 }
@@ -867,15 +878,41 @@ const STAR_TINT = ["var(--star-core)", "var(--moon)", "var(--star)"];
 /** Node size reads degree at a glance. sqrt so a hub does not swamp the view. */
 const radiusFor = (degree) => 4 + Math.sqrt(degree) * 2;
 
+/**
+ * Change mode, keeping the window.
+ *
+ * The window outlives a mode change on purpose. It is the second, orthogonal
+ * axis of the view — dropping it here would make the brush behave like a fifth
+ * mode after all, which is the design it was built to avoid.
+ */
 function setGraphView(view) {
-  state.view = view;
+  state.view = { ...view, window: state.view.window };
   renderGraph();
+  renderStrip();
+}
+
+/** Set or clear the brushed window. null means no window at all. */
+function setGraphWindow(window) {
+  state.view = { ...state.view, window };
+  renderGraph();
+  renderStrip();
 }
 
 function renderGraph() {
   if (!state.graph) return;
 
-  const current = scene(state.graph, state.positions, state.view);
+  const current = scene(state.graph, state.positions, state.view, state.spans);
+  // Only meaningful while a window is brushed; without one everything is null
+  // and saying so would be noise on every tooltip in the app.
+  const why = (inWindow) =>
+    !current.window
+      ? ""
+      : inWindow === null
+        ? " · no event date, never dimmed"
+        : inWindow === false
+          ? " · outside the window"
+          : " · inside the window";
+  const out = (inWindow) => (inWindow === false ? " gout" : "");
   const plates = [];
   state.view = { ...state.view, mode: current.mode }; // scene may have fallen back
 
@@ -979,7 +1016,9 @@ function renderGraph() {
         cx: domain.x,
         cy: domain.y,
         r: domain.moonR,
-        class: `gorbit gorbit--moon gorbit--${domain.state} gp-${planetToken(state.graph.domains.indexOf(domain.name))}`,
+        class:
+          `gorbit gorbit--moon gorbit--${domain.state} ` +
+          `gp-${planetToken(state.graph.domains.indexOf(domain.name))}${out(domain.inWindow)}`,
       })
     );
   }
@@ -992,7 +1031,15 @@ function renderGraph() {
   for (const chord of current.domainChords) {
     layers.edges.push(
       svg("path", {
-        class: "gchord",
+        // Same rule as an edge: a chord dims only when both of its domains are
+        // out, or a lit planet would appear to reference nothing.
+        class: `gchord${
+          current.window &&
+          current.domains.find((d) => d.name === chord.a)?.inWindow === false &&
+          current.domains.find((d) => d.name === chord.b)?.inWindow === false
+            ? " gout"
+            : ""
+        }`,
         d: `M${chord.from.x} ${chord.from.y} Q ${chord.via.x} ${chord.via.y} ${chord.to.x} ${chord.to.y}`,
         "stroke-width": Math.min(6, 1 + chord.weight * 0.55),
       })
@@ -1002,7 +1049,7 @@ function renderGraph() {
   for (const edge of current.edges) {
     layers.edges.push(
       svg("path", {
-        class: `gedge${edge.state === "emphasis" ? " gedge--emphasis" : ""}`,
+        class: `gedge${edge.state === "emphasis" ? " gedge--emphasis" : ""}${out(edge.inWindow)}`,
         d: `M${edge.from.x} ${edge.from.y} Q ${edge.via.x} ${edge.via.y} ${edge.to.x} ${edge.to.y}`,
       })
     );
@@ -1010,7 +1057,24 @@ function renderGraph() {
 
   for (const domain of current.domains) {
     const token = planetToken(state.graph.domains.indexOf(domain.name));
-    const group = svg("g", { class: `gdom gdom--${domain.state} gp-${token} ghit`, tabindex: "0", role: "button" });
+    const group = svg("g", {
+      class: `gdom gdom--${domain.state} gp-${token} ghit${out(domain.inWindow)}`,
+      tabindex: "0",
+      role: "button",
+    });
+    // A planet holding no dated files at all reads as lit, exactly like one
+    // that was live during the window. Only a tooltip can tell them apart, and
+    // in the domains view — where the window says the most — the difference is
+    // the whole finding.
+    group.append(
+      (() => {
+        const t = svg("title");
+        t.textContent =
+          `${domain.name} — ${domain.count} file${domain.count === 1 ? "" : "s"}` +
+          (current.window && domain.inWindow === null ? " · none of them dated" : why(domain.inWindow));
+        return t;
+      })()
+    );
     const pr = (domain.r ?? 14) + (domain.state === "focus" ? 3 : 0);
     group.append(
       svg("circle", { cx: domain.x, cy: domain.y, r: pr, fill: planetFill.get(domain.name) ?? "none" })
@@ -1054,7 +1118,11 @@ function renderGraph() {
   }
 
   for (const node of current.nodes) {
-    const group = svg("g", { class: `gnode gnode--${node.state} ghit`, tabindex: "0", role: "button" });
+    const group = svg("g", {
+      class: `gnode gnode--${node.state} ghit${out(node.inWindow)}`,
+      tabindex: "0",
+      role: "button",
+    });
     // A moon REFLECTS. It gets the same treatment as a planet - lit limb toward
     // the star, far side in shadow - and no bloom of its own, because emission
     // is the star’s alone. Thirty white discs with halos read as thirty little
@@ -1070,7 +1138,8 @@ function renderGraph() {
     );
 
     const title = svg("title");
-    title.textContent = `${node.path} — ${node.degree} link${node.degree === 1 ? "" : "s"}`;
+    title.textContent =
+      `${node.path} — ${node.degree} link${node.degree === 1 ? "" : "s"}` + why(node.inWindow);
     group.append(title);
 
     const focus = () => setGraphView({ mode: "file", path: node.path });
@@ -1096,7 +1165,7 @@ function renderGraph() {
       x: node.x + (dx / length) * (radiusFor(node.degree) + 9),
       y: node.y + (dy / length) * (radiusFor(node.degree) + 9) + 3.5,
       "text-anchor": dx > 6 ? "start" : dx < -6 ? "end" : "middle",
-      class: "glabel",
+      class: `glabel${out(node.inWindow)}`,
     });
     label.textContent = node.name;
     layers.labels.push(label);
@@ -1171,6 +1240,181 @@ function frameToContent(current) {
 // crossing one continued through a stretch where nothing was recorded, and
 // hiding that would be a different claim than the data supports.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The brush
+//
+// A date window dragged across the connections. Time is a FILTER here and never
+// a layout: the window changes which bodies are lit and moves none of them,
+// which is the property the whole drill-down mechanic rests on.
+//
+// The strip is the third consumer of one scale, alongside the timeline and the
+// health panel's staleness. A break here is the same break there, because it is
+// literally the same object — two axes computed separately would drift apart
+// the first time either threshold moved.
+// ---------------------------------------------------------------------------
+
+const STRIP = { minWidth: 340, padL: 12, padR: 12, height: 50, top: 10, bottom: 32, minTickGap: 58 };
+
+const DAY_MS = 86_400_000;
+
+/** Dates as the readout says them. */
+const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/** Midnight at the start of the day a moment falls in. */
+const floorDay = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
+
+function renderStrip() {
+  const axis = state.chronology ? axisOf(state.chronology) : { empty: true };
+
+  // No dated file means no axis to brush. Hiding the control is better than
+  // offering one that cannot do anything.
+  els.graphBrush.hidden = axis.empty;
+  if (axis.empty) return;
+
+  const width = Math.max(STRIP.minWidth, els.graphBrush.clientWidth);
+  const plot = width - STRIP.padL - STRIP.padR;
+  const at = (unit) => STRIP.padL + unit * plot;
+  const { top, bottom } = STRIP;
+
+  els.graphStrip.setAttribute("viewBox", `0 0 ${width} ${STRIP.height}`);
+  els.graphStrip.setAttribute("width", width);
+  els.graphStrip.setAttribute("height", STRIP.height);
+
+  const parts = [svg("rect", { x: STRIP.padL, y: top, width: plot, height: bottom - top, class: "gbrush-track" })];
+
+  for (const band of axis.breaks) {
+    const x0 = at(band.x0);
+    parts.push(
+      titled(
+        svg("rect", { x: x0, y: top, width: Math.max(2, at(band.x1) - x0), height: bottom - top, class: "gbrush-break" }),
+        `${band.label} with no dated entries — a handle dropped here snaps inside it`
+      )
+    );
+  }
+
+  // Every recorded moment, drawn before the ticks so a label always wins.
+  // These are what you aim a brush at.
+  for (const position of axis.events) {
+    const x = at(position);
+    parts.push(svg("line", { x1: x, y1: top + 3, x2: x, y2: bottom - 3, class: "gbrush-event" }));
+  }
+
+  let lastTick = -Infinity;
+  for (const tick of axis.ticks) {
+    const x = at(tick.x);
+    if (x - lastTick < STRIP.minTickGap) continue;
+    lastTick = x;
+    parts.push(svg("line", { x1: x, y1: bottom, x2: x, y2: bottom + 3, class: "gbrush-tick" }));
+    // The end labels turn to face inward rather than centring on their tick.
+    // The first tick sits at x = padL, and a centred label there runs off the
+    // left of the viewBox and is simply cut in half.
+    const label = svg("text", {
+      x,
+      y: bottom + 13,
+      class: "gbrush-tick-label",
+      "text-anchor": x < 30 ? "start" : x > width - 30 ? "end" : "middle",
+    });
+    label.textContent = tick.label;
+    parts.push(label);
+  }
+
+  if (axis.today !== null) {
+    const x = at(axis.today);
+    parts.push(titled(svg("line", { x1: x, y1: top - 3, x2: x, y2: bottom + 3, class: "gbrush-today" }), "today"));
+  }
+
+  const win = state.view.window;
+  if (win) {
+    const scale = state.chronology.scale;
+    const x0 = at(scale.project(win.from));
+    const x1 = at(scale.project(win.to));
+    parts.push(svg("rect", { x: x0, y: top, width: Math.max(2, x1 - x0), height: bottom - top, class: "gbrush-window" }));
+    for (const x of [x0, x1]) {
+      parts.push(svg("line", { x1: x, y1: top - 4, x2: x, y2: bottom + 4, class: "gbrush-handle" }));
+    }
+  }
+
+  els.graphStrip.replaceChildren(...parts);
+  els.graphWindowClear.hidden = !win;
+  // to is exclusive — midnight ending the last included day — so the readout
+  // names that day rather than the one after it.
+  els.graphWindow.textContent = win
+    ? `${isoDay(win.from)} → ${isoDay(win.to - 1)} · ${humanDuration(win.to - win.from)}`
+    : "Drag across the strip to filter by date. Files with no date are never dimmed.";
+}
+
+// --- dragging ---------------------------------------------------------------
+//
+// Coalesced to one redraw per animation frame, because pointermove fires faster
+// than frames and would otherwise run the same work several times for a single
+// picture. It is not a performance rescue: a full renderGraph is ~7ms and holds
+// 60fps redrawn every frame, with room to spare. The frame gate just stops the
+// waste.
+
+let dragFrom = null;
+let dragTo = null;
+let dragFromUnit = 0;
+let dragToUnit = 0;
+let dragFrame = 0;
+
+/** Where the pointer is on the axis, as a 0..1 position. */
+function unitAt(event) {
+  const box = els.graphStrip.getBoundingClientRect();
+  const plot = box.width - STRIP.padL - STRIP.padR;
+  if (plot <= 0) return 0;
+  return Math.min(1, Math.max(0, (event.clientX - box.left - STRIP.padL) / plot));
+}
+
+function commitDrag() {
+  dragFrame = 0;
+  if (dragFrom === null) return;
+
+  // Was this a drag at all? Measured in PIXELS, because that is the gesture
+  // being classified. A press with no movement means no window, not a window of
+  // zero width — nothing would survive that filter and nobody asked for it.
+  // Measuring it in days instead would make a deliberate single-day selection
+  // in the dense August stretch indistinguishable from a click.
+  const plot = els.graphStrip.getBoundingClientRect().width - STRIP.padL - STRIP.padR;
+  if (Math.abs(dragToUnit - dragFromUnit) * plot < 3) {
+    setGraphWindow(null);
+    return;
+  }
+
+  // A window is a range of DAYS, not of instants. A drag lands mid-day at both
+  // ends, so both those days are included whole. Without this the readout shows
+  // two dates and a duration that contradict them: 08-19 to 08-25, "5 days".
+  const from = floorDay(Math.min(dragFrom, dragTo));
+  const to = floorDay(Math.max(dragFrom, dragTo)) + DAY_MS;
+  setGraphWindow({ from, to });
+}
+
+els.graphStrip.addEventListener("pointerdown", (event) => {
+  const scale = state.chronology?.scale;
+  if (!scale) return;
+  els.graphStrip.setPointerCapture(event.pointerId);
+  dragFromUnit = dragToUnit = unitAt(event);
+  dragFrom = dragTo = scale.resolve(dragFromUnit).ms;
+  commitDrag();
+});
+
+els.graphStrip.addEventListener("pointermove", (event) => {
+  if (dragFrom === null) return;
+  dragToUnit = unitAt(event);
+  dragTo = state.chronology.scale.resolve(dragToUnit).ms;
+  if (!dragFrame) dragFrame = requestAnimationFrame(commitDrag);
+});
+
+for (const type of ["pointerup", "pointercancel"]) {
+  els.graphStrip.addEventListener(type, () => {
+    if (dragFrom === null) return;
+    if (dragFrame) cancelAnimationFrame(dragFrame);
+    commitDrag();
+    dragFrom = dragTo = null;
+  });
+}
+
+els.graphWindowClear.addEventListener("click", () => setGraphWindow(null));
 
 const TL = { minWidth: 760, labelWidth: 232, rightPad: 28, top: 46, rowHeight: 24, bottom: 30, minTickGap: 54 };
 
@@ -1418,7 +1662,13 @@ els.reload.addEventListener("click", openVault);
 
 els.viewHealth.addEventListener("click", () => showOnly("summary"));
 els.viewBrowse.addEventListener("click", () => showOnly("browse"));
-els.viewGraph.addEventListener("click", () => showOnly("graph"));
+els.viewGraph.addEventListener("click", () => {
+  showOnly("graph");
+  // Measured from a panel that was display:none until this moment, so the first
+  // render always measures zero and falls back to the minimum. Same reason the
+  // timeline re-renders here.
+  renderStrip();
+});
 els.viewTimeline.addEventListener("click", () => {
   showOnly("timeline");
   // The width is measured from the panel, which is display:none until now — so
@@ -1434,6 +1684,7 @@ els.timelineDomain.addEventListener("change", renderTimeline);
 // a timer to reason about.
 window.addEventListener("resize", () => {
   if (!els.timeline.hidden) renderTimeline();
+  if (!els.graph.hidden) renderStrip();
 });
 
 els.graphHome.addEventListener("click", () => setGraphView({ mode: "domains" }));

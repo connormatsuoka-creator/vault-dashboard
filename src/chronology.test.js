@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 
 import { buildModel } from "./model.js";
 import {
+  axisOf,
   trackSpans,
   parsePart,
   parseOccurred,
@@ -554,4 +555,55 @@ test("trackSpans hands the graph intervals and nothing else", () => {
   assert.equal(spans.size, 1);
   assert.equal(spans.has("system/undated.md"), false, "an undated file must be absent, not null");
   assert.deepEqual(Object.keys(spans.get("ventures/dated.md")).sort(), ["from", "to"]);
+});
+
+test("the axis reports where events are, not only where the voids are", () => {
+  // Two voids meeting at a single instant. b.md's whole span is one anchor, so
+  // it has zero width on the axis: a strip drawing only the breaks shows one
+  // dead block where there is in fact a recorded moment. Six of the real
+  // vault's breaks are contiguous exactly like this.
+  const model = modelOf([
+    ["a.md", file("occurred: 2017-01-01")],
+    ["b.md", file("occurred: 2024-06-01")],
+    ["c.md", file("occurred: 2025-01-01")],
+  ]);
+  const axis = axisOf(buildChronology(model, TODAY));
+
+  assert.ok(axis.breaks.length >= 2, `expected contiguous breaks, got ${axis.breaks.length}`);
+  assert.ok(axis.events.length > axis.breaks.length, "events must outnumber the voids between them");
+
+  // Every void's edges are event positions — which is exactly why a handle
+  // dropped in a void must not snap to one.
+  for (const band of axis.breaks) {
+    assert.ok(axis.events.includes(band.x0), "a break's start is an event position");
+    assert.ok(axis.events.includes(band.x1), "a break's end is an event position");
+  }
+
+  // Sorted and deduped, so a renderer can draw them straight through.
+  assert.deepEqual(axis.events, [...new Set(axis.events)].sort((x, y) => x - y));
+  assert.ok(axis.events.every((x) => x >= 0 && x <= 1));
+});
+
+test("the timeline and the strip read the same axis", () => {
+  // One scale, three consumers. Two axes computed separately would drift apart
+  // the first time either threshold moved, and a break would then mean a
+  // different stretch on each panel.
+  const model = modelOf([
+    ["a.md", file("occurred: 2017-01-01")],
+    ["b.md", file("occurred: 2026-08-14/2026-08-20")],
+  ]);
+  const chronology = buildChronology(model, TODAY);
+  const scene = timelineScene(chronology);
+  const axis = axisOf(chronology);
+
+  assert.deepEqual(scene.axis.breaks, axis.breaks);
+  assert.deepEqual(scene.axis.ticks, axis.ticks);
+  assert.equal(scene.today, axis.today);
+});
+
+test("an axis with no scale reports empty rather than throwing", () => {
+  const axis = axisOf({ scale: null, today: 0 });
+  assert.equal(axis.empty, true);
+  assert.deepEqual([axis.ticks, axis.breaks, axis.events], [[], [], []]);
+  assert.equal(axis.today, null);
 });

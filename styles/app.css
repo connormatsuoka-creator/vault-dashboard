@@ -741,13 +741,13 @@ code {
   fill: none;
   stroke: var(--text-muted);
   stroke-width: 1;
-  opacity: 0.3;
+  --mode-dim: 0.3;
 }
 
 .gedge--emphasis {
   stroke: var(--accent);
   stroke-width: 1.5;
-  opacity: 0.55;
+  --mode-dim: 0.55;
 }
 
 .gchord {
@@ -779,7 +779,7 @@ code {
 }
 
 .gdom--muted {
-  opacity: 0.35;
+  --mode-dim: 0.35;
 }
 
 .gdom--focus .gdom-count {
@@ -1208,16 +1208,16 @@ code {
   fill: none;
   stroke: var(--link-cross);
   stroke-width: 0.7;
-  opacity: 0.13;
+  --mode-dim: 0.13;
 }
 
 .gorbit--moon {
-  opacity: 0.17;
+  --mode-dim: 0.17;
   stroke-width: 0.6;
 }
 
 .gorbit--muted {
-  opacity: 0.05;
+  --mode-dim: 0.05;
 }
 
 .gplanet-rim {
@@ -1245,7 +1245,7 @@ code {
 }
 
 .gnode--muted {
-  opacity: 0.18;
+  --mode-dim: 0.18;
 }
 
 /* Every label on the diagram gets its own dark plate, so none is ever read
@@ -1299,3 +1299,115 @@ code {
 .gp-6 .gdom-count { fill: var(--planet-6-dark); }
 .gorbit--moon.gp-6 { stroke: var(--planet-6); }
 
+
+/* ---------------------------------------------------------------------------
+ * The brush: a date window across the connections
+ *
+ * TWO INDEPENDENT JUDGMENTS LAND ON THE SAME ELEMENT. The mode decides a base
+ * opacity; the window decides whether the thing was live then. They MULTIPLY
+ * rather than override, for the same reason graph.js keeps `state` and
+ * `inWindow` as two fields instead of one: a file can be muted by its mode and
+ * inside the window at once, and a cascade where the later rule simply wins
+ * would throw one of the two answers away.
+ *
+ * That is why every mode opacity above is now a --mode-dim variable. Setting
+ * `opacity` directly in both places would make them fight over one property.
+ *
+ * Nothing here dims an UNDATED file. 15 of the vault's 36 carry no event date,
+ * and dimming them would assert they were absent during the window, which the
+ * data does not support.
+ * ------------------------------------------------------------------------- */
+
+.gnode,
+.gdom,
+.gedge,
+.gchord,
+.gorbit,
+.glabel {
+  opacity: calc(var(--mode-dim, 1) * var(--window-dim, 1));
+}
+
+.gout {
+  --window-dim: 0.16;
+}
+
+.gbrush {
+  margin: var(--space-3) 0 var(--space-2);
+  overflow-x: auto;
+}
+
+/* touch-action is load-bearing, not decoration: without it a touch drag scrolls
+ * the page and the pointermove stream stops arriving. */
+.gbrush-strip {
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* --surface, not --surface-raised. The break bands below are drawn in --bg,
+ * and #07070d on #0b0b14 is four units of difference: the collapsed stretches
+ * were invisible, which defeats the only thing the strip has to communicate
+ * besides position. Against --surface they read. */
+.gbrush-track {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+/* A collapsed stretch reads as a hole in the axis rather than as content. */
+.gbrush-break {
+  fill: var(--bg);
+}
+
+/* One recorded moment. Hairline and faint: it is a density reading, not a
+ * feature to be clicked, and in the dense August stretch there are dozens. */
+.gbrush-event {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.45;
+}
+
+.gbrush-tick {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.gbrush-tick-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--text-faint);
+}
+
+/* Dashed, exactly as on the timeline. Today means the same thing on both, so
+ * it had better not look like two different marks. */
+.gbrush-today {
+  stroke: var(--star);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+.gbrush-window {
+  fill: var(--accent);
+  opacity: 0.15;
+}
+
+.gbrush-handle {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.gbrush-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.gbrush-readout {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}

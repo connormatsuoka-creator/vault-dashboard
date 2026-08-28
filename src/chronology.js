@@ -612,6 +612,47 @@ function tickLabel(ms, totalSpan) {
 }
 
 /**
+ * The axis alone: ticks, breaks and today, with no rows.
+ *
+ * Extracted because the brush strip needs exactly this and nothing else. It is
+ * the third consumer of one scale, which is the point — a break in the strip
+ * means the same eleven months it means on the timeline, because it IS the same
+ * break. Two axes computed separately would drift apart the first time either
+ * threshold moved.
+ */
+export function axisOf(chronology) {
+  const { scale, today } = chronology;
+  if (!scale) return { ticks: [], breaks: [], events: [], today: null, empty: true };
+
+  const totalSpan = scale.to - scale.from;
+  const ticks = [];
+  let previous = null;
+  for (const segment of scale.segments) {
+    const label = tickLabel(segment.from, totalSpan);
+    if (label !== previous) {
+      ticks.push({ x: segment.x0, label, ms: segment.from });
+      previous = label;
+    }
+  }
+
+  // Where things actually happened, as positions on the axis.
+  //
+  // A strip that draws only breaks is lying by omission. Six of this vault's
+  // breaks are CONTIGUOUS - each pair is separated by a single instant, an
+  // event whose whole span is one anchor - so the compressed stretch reads as
+  // one dead block when it in fact holds five distinct moments. The timeline
+  // gets away without this because its rows draw a mark at that position; a
+  // strip has no rows, so the moment vanishes with nothing to stand for it.
+  const events = [];
+  for (const segment of scale.segments) {
+    if (events[events.length - 1] !== segment.x0) events.push(segment.x0);
+    events.push(segment.x1);
+  }
+
+  return { ticks, breaks: scale.breaks, events, today: scale.project(today), empty: false };
+}
+
+/**
  * Project every track onto the axis.
  *
  * @param {object} chronology from buildChronology
@@ -633,7 +674,7 @@ export function timelineScene(chronology, view = {}) {
   }
 
   const at = (t) => scale.project(t);
-  const totalSpan = scale.to - scale.from;
+  const axis = axisOf(chronology);
 
   const rows = shown.map((track) => ({
     path: track.path,
@@ -661,16 +702,6 @@ export function timelineScene(chronology, view = {}) {
     })),
   }));
 
-  const ticks = [];
-  let previous = null;
-  for (const segment of scale.segments) {
-    const label = tickLabel(segment.from, totalSpan);
-    if (label !== previous) {
-      ticks.push({ x: segment.x0, label, ms: segment.from });
-      previous = label;
-    }
-  }
-
   const ahead = shown.reduce((sum, t) => sum + t.marks.filter((m) => m.future).length, 0);
   const caption =
     `${shown.length} dated file${shown.length === 1 ? "" : "s"} · ` +
@@ -678,5 +709,5 @@ export function timelineScene(chronology, view = {}) {
     `${undated.length} undated` +
     (ahead ? ` · ${ahead} ahead of today` : "");
 
-  return { rows, axis: { ticks, breaks: scale.breaks }, today: at(today), undated, empty: false, caption };
+  return { rows, axis, today: axis.today, undated, empty: false, caption };
 }
