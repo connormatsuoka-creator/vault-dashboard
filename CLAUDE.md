@@ -15,8 +15,10 @@ of it here.** This file carries repo facts only.
 Static site. **No build step, no dependencies, no package.json.** That is a constraint, not
 an omission — see the vault for the reasoning.
 
-**Run it:** `npx --yes serve -l 5501 .` then open `http://localhost:5501`.
-`.claude/launch.json` does the same if a session is opened in this folder.
+**Run it:** `npx --yes serve -l tcp://127.0.0.1:5501 .` then open `http://localhost:5501`.
+`.claude/launch.json` does the same if a session is opened in this folder. **Keep the
+`tcp://127.0.0.1` form.** A bare `-l 5501` listens on every network interface though serve's
+banner says localhost, and whether the Wi-Fi can reach it is then up to the firewall.
 
 **It cannot be opened as a file.** `file://` gives an opaque origin, and the File System
 Access API refuses to grant folder permissions to one. It must be served over `localhost`

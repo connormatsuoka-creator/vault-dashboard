@@ -4,7 +4,7 @@
     {
       "name": "vault-dashboard",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "serve", "-l", "5501", "."],
+      "runtimeArgs": ["--yes", "serve", "-l", "tcp://127.0.0.1:5501", "."],
       "port": 5501
     }
   ]
