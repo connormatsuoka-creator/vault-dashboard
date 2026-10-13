@@ -29,7 +29,7 @@ const FULL = [
   "owns: [vault-thresholds]",
   "cap-router: 90",
   "cap-index: 45",
-  "cap-leaf: 200",
+  "cap-leaf: 250",
   "cap-exempt: [system/setup.md, system/other.md]",
   "inbox-max: 25",
   "stale-days: 60",
@@ -50,7 +50,7 @@ test("no config file falls back entirely, and says so", () => {
 
 test("a complete config wins on every value", () => {
   const t = loadThresholds(withConfig(FULL));
-  assert.deepEqual(t.caps, { router: 90, index: 45, leaf: 200 });
+  assert.deepEqual(t.caps, { router: 90, index: 45, leaf: 250 });
   assert.deepEqual(t.capExempt, ["system/setup.md", "system/other.md"]);
   assert.equal(t.inboxMax, 25);
   assert.equal(t.staleDays, 60);
@@ -82,7 +82,7 @@ test("a partial config falls back per key, and names which", () => {
 });
 
 test("a non-numeric value falls back rather than poisoning the check", () => {
-  const t = loadThresholds(withConfig(FULL.replace("cap-leaf: 200", "cap-leaf: soon")));
+  const t = loadThresholds(withConfig(FULL.replace("cap-leaf: 250", "cap-leaf: soon")));
   assert.equal(t.caps.leaf, THRESHOLDS.caps.leaf);
   assert.match(t.source, /cap-leaf/);
   assert.equal(t.caps.router, 90, "the other values must be unaffected");
