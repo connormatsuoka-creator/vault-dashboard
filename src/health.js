@@ -32,7 +32,7 @@ import { isIsoDate, isOccurred } from "./chronology.js";
 
 export const THRESHOLDS = {
   source: "vault CLAUDE.md — Size caps and Staleness",
-  caps: { router: 80, index: 40, leaf: 200 },
+  caps: { router: 80, index: 50, leaf: 200 },
   // Paths the vault exempts from its caps. Data rather than a special case buried
   // in the check, so the list renders on screen beside the caps themselves — an
   // exemption nobody can see is indistinguishable from a check that quietly broke.
